@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+  outline: none !important;
+}
+
+/* Remove default focus rings that cause 'white rectangle' borders */
+*:focus {
+  outline: none !important;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #04040d;
+  color: #ccc;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080810;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1a2e;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a4e;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1a1a2e #080810;
+}
+
+/* Input focus styles */
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #00FFB2 !important;
+  outline: none;
+}
+
+/* Button hover effects */
+button:hover {
+  opacity: 0.9;
+}
+
+/* Range input styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00FFB2;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #00FFB2;
+  cursor: pointer;
+  border: none;
+}
+
+/* Selection color */
+::selection {
+  background: #00FFB244;
+  color: #fff;
+}
+
+/* Date input fix for dark theme */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.5);
+  cursor: pointer;
+}
+
+/* Select arrow styling */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px !important;
+}
