@@ -22,6 +22,8 @@ import type {
   ApiResponse,
   ApiListResponse,
   AnalyticsOverviewDTO,
+  AIChatRequestPayload,
+  AIChatResponseDTO,
 } from "./types";
 
 // ─── PROJECTS ─────────────────────────────────────────────────────────────────
@@ -34,6 +36,14 @@ export const projectsApi = {
   /** GET /api/projects/:id */
   get: (id: number) =>
     http.get<ApiResponse<ProjectDTO>>(`/projects/${id}`),
+
+  /** GET /api/projects/:id?refreshGit=true */
+  getWithGitRefresh: (id: number) =>
+    http.get<ApiResponse<ProjectDTO>>(`/projects/${id}?refreshGit=true`),
+
+  /** GET /api/projects/:id/git-metrics */
+  getGitMetrics: (id: number) =>
+    http.get<ApiResponse<unknown>>(`/projects/${id}/git-metrics`),
 
   /** POST /api/projects */
   create: (payload: CreateProjectPayload) =>
@@ -154,4 +164,12 @@ export const analyticsApi = {
   /** GET /api/analytics/overview */
   overview: () =>
     http.get<ApiResponse<AnalyticsOverviewDTO>>("/analytics/overview"),
+};
+
+// â”€â”€â”€ AI CHAT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+export const aiApi = {
+  /** POST /api/ai/chat */
+  chat: (payload: AIChatRequestPayload) =>
+    http.post<ApiResponse<AIChatResponseDTO>>("/ai/chat", payload),
 };

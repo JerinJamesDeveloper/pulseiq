@@ -86,6 +86,16 @@ const docController = {
     // PUT /api/projects/:projectId/docs/:id
     updateDoc: async (req, res, next) => {
         try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
             const doc = await Documentation.findById(req.params.id);
             if (!doc) {
                 return res.status(404).json({
@@ -95,7 +105,14 @@ const docController = {
                 });
             }
 
-            await Documentation.update(req.params.id, req.body);
+            const updated = await Documentation.update(req.params.id, req.body);
+            if (!updated) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'No valid updatable fields provided',
+                    statusCode: 400
+                });
+            }
             const updatedDoc = await Documentation.findById(req.params.id);
             
             res.json({

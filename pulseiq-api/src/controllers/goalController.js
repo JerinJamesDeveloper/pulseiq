@@ -86,6 +86,16 @@ const goalController = {
     // PUT /api/projects/:projectId/goals/:id
     updateGoal: async (req, res, next) => {
         try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
             const goal = await Goal.findById(req.params.id);
             if (!goal) {
                 return res.status(404).json({
@@ -95,7 +105,14 @@ const goalController = {
                 });
             }
 
-            await Goal.update(req.params.id, req.body);
+            const updated = await Goal.update(req.params.id, req.body);
+            if (!updated) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'No valid updatable fields provided',
+                    statusCode: 400
+                });
+            }
             const updatedGoal = await Goal.findById(req.params.id);
             
             res.json({

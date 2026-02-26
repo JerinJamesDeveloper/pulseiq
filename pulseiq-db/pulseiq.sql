@@ -32,11 +32,24 @@ ORDER BY p.createdDate DESC;
 
 show tables;
 
-select * from projects;
-select * from tech_stack;
+select * from goals;
+select * from commits_by_day;
 -- =====================================================
 -- 1. PROJECTS TABLE
 -- =====================================================
+
+ALTER TABLE projects
+MODIFY COLUMN category ENUM(
+    'E-Commerce',
+    'SaaS Tool',
+    'DevOps',
+    'Mobile App',
+    'API Service',
+    'Data Pipeline',
+    'ML/AI',
+    'Open Source',
+    'LIMS Development'
+) NOT NULL;
 CREATE TABLE projects (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -57,6 +70,9 @@ CREATE TABLE projects (
     INDEX idx_category (category),
     INDEX idx_created (createdDate)
 );
+
+ALTER TABLE projects
+ADD COLUMN git_repo VARCHAR(255) NULL AFTER name;
 
 -- =====================================================
 -- 2. TECH STACK TABLE (Many-to-Many with projects)
@@ -187,7 +203,7 @@ CREATE TABLE learning_resources (
     FOREIGN KEY (learningEntryId) REFERENCES learning_entries(id) ON DELETE CASCADE,
     INDEX idx_entry (learningEntryId)
 );
-
+SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, weekStartDate FROM weekly_hours WHERE projectId = 2 ORDER BY weekStartDate DESC LIMIT 1;
 -- =====================================================
 -- 11. DAILY REPORTS TABLE
 -- =====================================================

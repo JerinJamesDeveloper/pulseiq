@@ -11,24 +11,10 @@ class LearningEntry {
             ORDER BY le.dateLogged DESC
         `, [projectId]);
 
-        return entries.map(entry => {
-            let resources = [];
-            if (entry.resources) {
-                try {
-                    resources = typeof entry.resources === 'string'
-                        ? JSON.parse(entry.resources)
-                        : entry.resources;
-                    // Filter out null values
-                    resources = Array.isArray(resources) ? resources.filter(r => r !== null) : [];
-                } catch (e) {
-                    resources = [];
-                }
-            }
-            return {
-                ...entry,
-                resources
-            };
-        });
+        return entries.map(entry => ({
+            ...entry,
+            resources: entry.resources.filter(r => r !== null)
+        }));
     }
 
     static async findById(id) {
@@ -41,20 +27,9 @@ class LearningEntry {
         `, [id]);
 
         if (entries.length === 0) return null;
-
+        
         const entry = entries[0];
-        let resources = [];
-        if (entry.resources) {
-            try {
-                resources = typeof entry.resources === 'string'
-                    ? JSON.parse(entry.resources)
-                    : entry.resources;
-                resources = Array.isArray(resources) ? resources.filter(r => r !== null) : [];
-            } catch (e) {
-                resources = [];
-            }
-        }
-        entry.resources = resources;
+        entry.resources = entry.resources.filter(r => r !== null);
         return entry;
     }
 
@@ -68,7 +43,7 @@ class LearningEntry {
                  (projectId, concept, category, difficulty, type, confidence, dateLogged, timeSpent)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [projectId, entryData.concept, entryData.category, entryData.difficulty,
-                    entryData.type, entryData.confidence, entryData.dateLogged, entryData.timeSpent]
+                 entryData.type, entryData.confidence, entryData.dateLogged, entryData.timeSpent]
             );
 
             const entryId = result.insertId;
@@ -99,10 +74,10 @@ class LearningEntry {
 
             const updates = [];
             const values = [];
-
-            const allowedFields = ['concept', 'category', 'difficulty', 'type',
-                'confidence', 'dateLogged', 'timeSpent'];
-
+            
+            const allowedFields = ['concept', 'category', 'difficulty', 'type', 
+                                  'confidence', 'dateLogged', 'timeSpent'];
+            
             for (const field of allowedFields) {
                 if (entryData[field] !== undefined) {
                     updates.push(`${field} = ?`);
@@ -128,8 +103,10 @@ class LearningEntry {
                 }
             }
 
+            const hasValidUpdatePayload = updates.length > 0 || entryData.resources !== undefined;
+
             await connection.commit();
-            return true;
+            return hasValidUpdatePayload;
         } catch (error) {
             await connection.rollback();
             throw error;

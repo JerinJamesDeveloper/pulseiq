@@ -162,7 +162,7 @@ Create a new project.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | ✅ | Project name (1-100 chars) |
-| `category` | string | ✅ | One of: `E-Commerce`, `SaaS Tool`, `DevOps`, `Mobile App`, `API Service`, `Data Pipeline`, `ML/AI`, `Open Source` |
+| `category` | string | ✅ | One of: `E-Commerce`, `SaaS Tool`, `DevOps`, `Mobile App`, `API Service`, `Data Pipeline`, `ML/AI`, `Open Source`, `LIMS development` |
 | `color` | string | ✅ | Hex color code (e.g., `#00FFB2`) |
 | `techStack` | string[] | ✅ | Array of technology names |
 | `totalTasks` | integer | ✅ | Estimated total task count (≥ 0) |
@@ -672,7 +672,7 @@ Get aggregated analytics across all projects.
 interface ProjectDTO {
   id: number;                        // Server-generated
   name: string;                      // 1-100 chars
-  category: string;                  // Enum: E-Commerce | SaaS Tool | DevOps | Mobile App | API Service | Data Pipeline | ML/AI | Open Source
+  category: string;                  // Enum: E-Commerce | SaaS Tool | DevOps | Mobile App | API Service | Data Pipeline | ML/AI | Open Source | LIMS development
   color: string;                     // Hex color: #RRGGBB
   totalTasks: number;                // >= 0
   completedTasks: number;            // >= 0

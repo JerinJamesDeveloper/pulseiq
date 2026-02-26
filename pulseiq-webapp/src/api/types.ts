@@ -67,6 +67,7 @@ export interface ProjectDTO {
   lastActive: string; // ISO date string
   commits: number;
   techStack: string[];
+  git_repo?: string;
   weeklyHours: number[];
   monthlyHours: number[];
   learningPoints: number;
@@ -76,7 +77,6 @@ export interface ProjectDTO {
   dailyReports: DailyReportDTO[];
   createdDate: string; // ISO date string
   goals: GoalDTO[];
-  repoUrl?: string;
 }
 
 // ─── REQUEST PAYLOADS (Create / Update) ───────────────────────────────────────
@@ -86,8 +86,8 @@ export interface CreateProjectPayload {
   category: string;
   color: string;
   techStack: string[];
+  git_repo?: string;
   totalTasks: number;
-  repoUrl?: string;
 }
 
 export interface UpdateProjectPayload {
@@ -104,10 +104,10 @@ export interface UpdateProjectPayload {
   lastActive?: string;
   commits?: number;
   techStack?: string[];
+  git_repo?: string;
   weeklyHours?: number[];
   monthlyHours?: number[];
   learningPoints?: number;
-  repoUrl?: string;
 }
 
 export interface CreateLearningEntryPayload {
@@ -212,4 +212,32 @@ export interface AnalyticsOverviewDTO {
   totalDocuments: number;
   overallProductivity: number;
   skillDistribution: Record<string, number>;
+}
+
+export type AIChatRole = "user" | "assistant" | "system";
+
+export interface AIChatMessageDTO {
+  role: AIChatRole;
+  content: string;
+}
+
+export interface AIChatRequestPayload {
+  prompt?: string;
+  messages?: AIChatMessageDTO[];
+  model?: string;
+}
+
+export interface AIChatChoiceDTO {
+  index?: number;
+  message?: AIChatMessageDTO;
+  text?: string;
+  finish_reason?: string;
+}
+
+export interface AIChatResponseDTO {
+  id?: string;
+  model?: string;
+  choices?: AIChatChoiceDTO[];
+  usage?: Record<string, unknown>;
+  [key: string]: unknown;
 }

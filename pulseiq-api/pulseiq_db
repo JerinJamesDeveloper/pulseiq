@@ -10,6 +10,7 @@ CREATE TABLE projects (
     name VARCHAR(100) NOT NULL,
     category ENUM('E-Commerce', 'SaaS Tool', 'DevOps', 'Mobile App', 'API Service', 'Data Pipeline', 'ML/AI', 'Open Source') NOT NULL,
     color VARCHAR(7) NOT NULL,
+    git_repo VARCHAR(255) NULL,
     totalTasks INT DEFAULT 0,
     completedTasks INT DEFAULT 0,
     features INT DEFAULT 0,

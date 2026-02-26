@@ -1,5 +1,6 @@
 const LearningEntry = require('../models/LearningEntry');
 const Project = require('../models/Project');
+const { validationResult } = require('express-validator');
 
 const learningController = {
     // GET /api/projects/:projectId/learning
@@ -50,6 +51,16 @@ const learningController = {
     // POST /api/projects/:projectId/learning
     createLearning: async (req, res, next) => {
         try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
             const project = await Project.findById(req.params.projectId);
             if (!project) {
                 return res.status(404).json({
@@ -75,6 +86,16 @@ const learningController = {
     // PUT /api/projects/:projectId/learning/:id
     updateLearning: async (req, res, next) => {
         try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
             const entry = await LearningEntry.findById(req.params.id);
             if (!entry) {
                 return res.status(404).json({
@@ -84,7 +105,14 @@ const learningController = {
                 });
             }
 
-            await LearningEntry.update(req.params.id, req.body);
+            const updated = await LearningEntry.update(req.params.id, req.body);
+            if (!updated) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'No valid updatable fields provided',
+                    statusCode: 400
+                });
+            }
             const updatedEntry = await LearningEntry.findById(req.params.id);
             
             res.json({

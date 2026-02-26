@@ -36,7 +36,7 @@ class Documentation {
             }
         }
 
-        if (updates.length === 0) return true;
+        if (updates.length === 0) return false;
 
         values.push(id);
         const [result] = await pool.query(

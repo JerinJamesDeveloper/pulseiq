@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   projectsApi,
+  aiApi,
   learningApi,
   reportsApi,
   docsApi,
@@ -20,6 +21,7 @@ import {
   type CreateGoalPayload,
   type UpdateProjectPayload,
 } from "./api";
+import * as XLSX from "xlsx";
 
 // ─── LOCAL TYPES ──────────────────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ interface Project {
   lastActive: Date;
   commits: number;
   techStack: string[];
+  git_repo?: string;
   weeklyHours: number[];
   monthlyHours: number[];
   learningPoints: number;
@@ -55,49 +58,145 @@ interface Project {
   dailyReports: DailyReportDTO[];
   createdDate: Date;
   goals: GoalDTO[];
-  repoUrl?: string;
 }
 
 type SyncStatus = "synced" | "syncing" | "offline" | "error";
+type ChatRole = "assistant" | "user" | "system";
+
+interface ChatMessage {
+  id: number;
+  role: ChatRole;
+  text: string;
+}
 
 // ─── DTO CONVERSION ───────────────────────────────────────────────────────────
 
 function dtoToProject(dto: ProjectDTO): Project {
-  if (!dto) {
-    // Return a dummy object if dto is null/undefined to prevent downstream crashes
-    return {
-      id: 0, name: "Unknown", category: "", color: "#555",
-      totalTasks: 0, completedTasks: 0, features: 0, bugsFixed: 0, refactors: 0,
-      totalHours: 0, activeDays: 0, lastActive: new Date(), commits: 0,
-      techStack: [], weeklyHours: [0, 0, 0, 0, 0, 0, 0], monthlyHours: [],
-      learningPoints: 0, learningEntries: [],
-      gitMetrics: { commitsByDay: [0, 0, 0, 0, 0, 0, 0], pullRequests: 0, mergedPRs: 0, codeReviews: 0, commitMessages: [], languages: {}, commitTrend: [] },
-      documentation: [], dailyReports: [], createdDate: new Date(), goals: [],
-      repoUrl: "",
-    };
-  }
+  const raw = dto as Partial<ProjectDTO>;
 
   return {
-    ...dto,
-    lastActive: dto.lastActive ? new Date(dto.lastActive) : new Date(),
-    createdDate: dto.createdDate ? new Date(dto.createdDate) : new Date(),
-    techStack: Array.isArray(dto.techStack) ? dto.techStack : [],
-    weeklyHours: Array.isArray(dto.weeklyHours) ? dto.weeklyHours : [0, 0, 0, 0, 0, 0, 0],
-    monthlyHours: Array.isArray(dto.monthlyHours) ? dto.monthlyHours : [],
-    learningEntries: Array.isArray(dto.learningEntries) ? dto.learningEntries : [],
-    documentation: Array.isArray(dto.documentation) ? dto.documentation : [],
-    dailyReports: Array.isArray(dto.dailyReports) ? dto.dailyReports : [],
-    goals: Array.isArray(dto.goals) ? dto.goals : [],
-    gitMetrics: {
-      commitsByDay: Array.isArray(dto.gitMetrics?.commitsByDay) ? dto.gitMetrics.commitsByDay : [0, 0, 0, 0, 0, 0, 0],
-      pullRequests: dto.gitMetrics?.pullRequests || 0,
-      mergedPRs: dto.gitMetrics?.mergedPRs || 0,
-      codeReviews: dto.gitMetrics?.codeReviews || 0,
-      commitMessages: Array.isArray(dto.gitMetrics?.commitMessages) ? dto.gitMetrics.commitMessages : [],
-      languages: dto.gitMetrics?.languages || {},
-      commitTrend: Array.isArray(dto.gitMetrics?.commitTrend) ? dto.gitMetrics.commitTrend : [],
-    },
-    repoUrl: dto.repoUrl || "",
+    ...raw,
+    techStack: Array.isArray(raw.techStack) ? raw.techStack : [],
+    git_repo: raw.git_repo ?? "",
+    weeklyHours: normalizeWeeklyHours(raw.weeklyHours),
+    monthlyHours: Array.isArray(raw.monthlyHours) ? raw.monthlyHours.map((n) => toFiniteNumber(n, 0)) : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    learningEntries: Array.isArray(raw.learningEntries) ? raw.learningEntries : [],
+    documentation: Array.isArray(raw.documentation) ? raw.documentation : [],
+    dailyReports: Array.isArray(raw.dailyReports) ? raw.dailyReports : [],
+    goals: Array.isArray(raw.goals) ? raw.goals : [],
+    gitMetrics: normalizeGitMetrics(raw.gitMetrics as Partial<Project["gitMetrics"]> | undefined),
+    lastActive: raw.lastActive ? new Date(raw.lastActive) : new Date(),
+    createdDate: raw.createdDate ? new Date(raw.createdDate) : new Date(),
+    id: raw.id ?? Date.now(),
+    name: raw.name ?? "Untitled Project",
+    category: raw.category ?? "General",
+    color: raw.color ?? "#00FFB2",
+    totalTasks: toFiniteNumber(raw.totalTasks, 0),
+    completedTasks: toFiniteNumber(raw.completedTasks, 0),
+    features: toFiniteNumber(raw.features, 0),
+    bugsFixed: toFiniteNumber(raw.bugsFixed, 0),
+    refactors: toFiniteNumber(raw.refactors, 0),
+    totalHours: toFiniteNumber(raw.totalHours, 0),
+    activeDays: toFiniteNumber(raw.activeDays, 0),
+    commits: toFiniteNumber(raw.commits, 0),
+    learningPoints: toFiniteNumber(raw.learningPoints, 0),
+  };
+}
+
+function normalizeWeeklyHours(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    // Supports either raw number arrays [mon..sun] or DB row arrays [{ weekStartDate, monday..sunday }]
+    if (value.length > 0 && value[0] && typeof value[0] === "object" && !Array.isArray(value[0])) {
+      const rows = value as Record<string, unknown>[];
+      const latestRow = rows
+        .slice()
+        .sort((a, b) => {
+          const aTs = Date.parse(String(a.weekStartDate ?? ""));
+          const bTs = Date.parse(String(b.weekStartDate ?? ""));
+          return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
+        })[0] || {};
+
+      return [
+        toFiniteNumber(latestRow.monday, 0),
+        toFiniteNumber(latestRow.tuesday, 0),
+        toFiniteNumber(latestRow.wednesday, 0),
+        toFiniteNumber(latestRow.thursday, 0),
+        toFiniteNumber(latestRow.friday, 0),
+        toFiniteNumber(latestRow.saturday, 0),
+        toFiniteNumber(latestRow.sunday, 0),
+      ];
+    }
+
+    return value.slice(0, 7).map((n) => toFiniteNumber(n, 0)).concat([0, 0, 0, 0, 0, 0, 0]).slice(0, 7);
+  }
+
+  if (value && typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    return [
+      toFiniteNumber(row.monday, 0),
+      toFiniteNumber(row.tuesday, 0),
+      toFiniteNumber(row.wednesday, 0),
+      toFiniteNumber(row.thursday, 0),
+      toFiniteNumber(row.friday, 0),
+      toFiniteNumber(row.saturday, 0),
+      toFiniteNumber(row.sunday, 0),
+    ];
+  }
+
+  return [0, 0, 0, 0, 0, 0, 0];
+}
+
+function normalizeLanguageDistribution(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .map(([language, count]) => [language, toFiniteNumber(count, 0)] as const)
+    .filter(([, count]) => count > 0);
+
+  if (entries.length === 0) {
+    return {};
+  }
+
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  if (total <= 0) {
+    return {};
+  }
+
+  let largestIndex = 0;
+  for (let i = 1; i < entries.length; i++) {
+    if (entries[i][1] > entries[largestIndex][1]) {
+      largestIndex = i;
+    }
+  }
+
+  const normalized = entries.map(([language, count]) => ({
+    language,
+    percent: Number(((count / total) * 100).toFixed(2)),
+  }));
+
+  const roundedTotal = normalized.reduce((sum, item) => sum + item.percent, 0);
+  const delta = Number((100 - roundedTotal).toFixed(2));
+  if (delta !== 0) {
+    normalized[largestIndex].percent = Number((normalized[largestIndex].percent + delta).toFixed(2));
+  }
+
+  return normalized.reduce<Record<string, number>>((acc, item) => {
+    acc[item.language] = item.percent;
+    return acc;
+  }, {});
+}
+
+function normalizeGitMetrics(git?: Partial<Project["gitMetrics"]>): Project["gitMetrics"] {
+  return {
+    commitsByDay: Array.isArray(git?.commitsByDay) ? git!.commitsByDay.map((n) => toFiniteNumber(n, 0)) : [0, 0, 0, 0, 0, 0, 0],
+    pullRequests: toFiniteNumber(git?.pullRequests, 0),
+    mergedPRs: toFiniteNumber(git?.mergedPRs, 0),
+    codeReviews: toFiniteNumber(git?.codeReviews, 0),
+    commitMessages: Array.isArray(git?.commitMessages) ? git!.commitMessages : [],
+    languages: normalizeLanguageDistribution(git?.languages),
+    commitTrend: Array.isArray(git?.commitTrend) ? git!.commitTrend.map((n) => toFiniteNumber(n, 0)) : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   };
 }
 
@@ -106,8 +205,160 @@ function projectToDto(p: Project): ProjectDTO {
     ...p,
     lastActive: p.lastActive.toISOString(),
     createdDate: p.createdDate.toISOString(),
-    repoUrl: p.repoUrl || undefined,
   };
+}
+
+function extractProjectDto(payload: unknown): ProjectDTO | null {
+  const tryObj = (v: unknown): ProjectDTO | null => {
+    if (!v || typeof v !== "object") return null;
+    const obj = v as Record<string, unknown>;
+    return typeof obj.id === "number" && typeof obj.name === "string" ? (obj as unknown as ProjectDTO) : null;
+  };
+
+  if (tryObj(payload)) return tryObj(payload);
+  if (payload && typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+    const candidates = [
+      obj.data,
+      obj.body,
+      obj.project,
+      obj.result,
+      (obj.data && typeof obj.data === "object") ? (obj.data as Record<string, unknown>).data : null,
+      (obj.body && typeof obj.body === "object") ? (obj.body as Record<string, unknown>).data : null,
+      (obj.data && typeof obj.data === "object") ? (obj.data as Record<string, unknown>).body : null,
+    ];
+    for (const c of candidates) {
+      const hit = tryObj(c);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function downloadProjectExcel(dto: ProjectDTO): Blob {
+  const wb = XLSX.utils.book_new();
+  const raw = dto as unknown as Record<string, unknown>;
+  const projectName = typeof raw.name === "string" ? raw.name : `project-${raw.id ?? "data"}`;
+
+  const summary = [{
+    id: raw.id ?? "",
+    name: raw.name ?? "",
+    category: raw.category ?? "",
+    color: raw.color ?? "",
+    totalTasks: toFiniteNumber(raw.totalTasks, 0),
+    completedTasks: toFiniteNumber(raw.completedTasks, 0),
+    features: toFiniteNumber(raw.features, 0),
+    bugsFixed: toFiniteNumber(raw.bugsFixed, 0),
+    refactors: toFiniteNumber(raw.refactors, 0),
+    totalHours: toFiniteNumber(raw.totalHours, 0),
+    activeDays: toFiniteNumber(raw.activeDays, 0),
+    commits: toFiniteNumber(raw.commits, 0),
+    learningPoints: toFiniteNumber(raw.learningPoints, 0),
+    git_repo: raw.git_repo ?? "",
+    lastActive: raw.lastActive ?? "",
+    createdDate: raw.createdDate ?? "",
+    updatedAt: raw.updatedAt ?? "",
+  }];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "Project");
+
+  const techStack = Array.isArray(raw.techStack) ? raw.techStack.map((tech, i) => ({ index: i + 1, tech })) : [];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(techStack), "TechStack");
+
+  const weekly = normalizeWeeklyHours(raw.weeklyHours).map((hours, i) => ({ day: WEEKLY_LABELS[i], hours }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(weekly), "WeeklyHours");
+
+  const monthlyHours = Array.isArray(raw.monthlyHours) ? raw.monthlyHours : [];
+  const monthly = monthlyHours.map((hours, i) => ({ dayIndex: i + 1, hours: toFiniteNumber(hours, 0) }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthly), "MonthlyHours");
+
+  const learningEntries = Array.isArray(raw.learningEntries) ? raw.learningEntries : [];
+  const learning = learningEntries.map((e) => {
+    const row = e as Record<string, unknown>;
+    return {
+      projectId: raw.id ?? "",
+      projectName: raw.name ?? "",
+      id: row.id ?? "",
+      concept: row.concept ?? "",
+      category: row.category ?? "",
+      difficulty: toFiniteNumber(row.difficulty, 0),
+      type: row.type ?? "",
+      confidence: row.confidence ?? "",
+      dateLogged: row.dateLogged ?? "",
+      timeSpent: toFiniteNumber(row.timeSpent, 0),
+      resources: Array.isArray(row.resources) ? row.resources.join(", ") : "",
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(learning), "LearningEntries");
+
+  const documentation = Array.isArray(raw.documentation)
+    ? (raw.documentation as Record<string, unknown>[]).map((doc) => ({
+        projectId: raw.id ?? "",
+        projectName: raw.name ?? "",
+        id: doc.id ?? "",
+        date: doc.date ?? "",
+        title: doc.title ?? "",
+        content: doc.content ?? "",
+        status: doc.status ?? "",
+        sections: toFiniteNumber(doc.sections, 0),
+        wordCount: toFiniteNumber(doc.wordCount, 0),
+      }))
+    : [];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(documentation), "Documentation");
+
+  const reports = Array.isArray(raw.dailyReports)
+    ? (raw.dailyReports as Record<string, unknown>[]).map((report) => ({
+        projectId: raw.id ?? "",
+        projectName: raw.name ?? "",
+        id: report.id ?? "",
+        date: report.date ?? "",
+        hoursWorked: toFiniteNumber(report.hoursWorked, 0),
+        tasksDone: toFiniteNumber(report.tasksDone, 0),
+        notes: report.notes ?? "",
+        mood: report.mood ?? "",
+        focusScore: toFiniteNumber(report.focusScore, 0),
+      }))
+    : [];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reports), "DailyReports");
+
+  const goals = Array.isArray(raw.goals)
+    ? (raw.goals as Record<string, unknown>[]).map((goal) => ({
+        projectId: raw.id ?? "",
+        projectName: raw.name ?? "",
+        id: goal.id ?? "",
+        title: goal.title ?? "",
+        category: goal.category ?? "",
+        target: toFiniteNumber(goal.target, 0),
+        current: toFiniteNumber(goal.current, 0),
+      }))
+    : [];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(goals), "Goals");
+
+  const gitMetrics = (raw.gitMetrics && typeof raw.gitMetrics === "object") ? raw.gitMetrics as Record<string, unknown> : {};
+  const git = [{
+    pullRequests: toFiniteNumber(gitMetrics.pullRequests, 0),
+    mergedPRs: toFiniteNumber(gitMetrics.mergedPRs, 0),
+    codeReviews: toFiniteNumber(gitMetrics.codeReviews, 0),
+    commitsByDay: Array.isArray(gitMetrics.commitsByDay) ? gitMetrics.commitsByDay.join(", ") : "",
+    commitTrend: Array.isArray(gitMetrics.commitTrend) ? gitMetrics.commitTrend.join(", ") : "",
+    commitMessages: Array.isArray(gitMetrics.commitMessages) ? gitMetrics.commitMessages.join(" | ") : "",
+    languages: gitMetrics.languages ? JSON.stringify(gitMetrics.languages) : "",
+  }];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(git), "GitMetrics");
+
+  const arrayBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+  const fileName = `${String(projectName).replace(/[^\w.-]+/g, "_")}-export.xlsx`;
+  const blob = new Blob([arrayBuffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return blob;
 }
 
 // ─── MOCK / FALLBACK DATA ─────────────────────────────────────────────────────
@@ -206,13 +457,31 @@ const DEFAULT_PROJECTS: Project[] = [
 ];
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const CATEGORIES = ["E-Commerce", "SaaS Tool", "DevOps", "Mobile App", "API Service", "Data Pipeline", "ML/AI", "Open Source"];
+const CATEGORIES = ["E-Commerce", "SaaS Tool", "DevOps", "Mobile App", "API Service", "Data Pipeline", "ML/AI", "Open Source", "LIMS development"];
 const COLORS = ["#00FFB2", "#FF6B35", "#A78BFA", "#38BDF8", "#FFD700", "#FF4444", "#00D9FF", "#FF00FF"];
 const WEEKLY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const SKILL_CATS = ["Backend", "Frontend", "DevOps", "Architecture", "Business"];
 const LEARNING_TYPES = ["New concept", "Mistake learned", "Deepened knowledge", "Optimization"];
 const MOODS = ["productive", "focused", "tired", "distracted", "stressed"];
 const DOC_STATUSES = ["draft", "in-progress", "complete"];
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeSkillCategory(category: unknown): string | null {
+  if (typeof category !== "string") return null;
+  const key = category.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  const map: Record<string, string> = {
+    backend: "Backend",
+    frontend: "Frontend",
+    devops: "DevOps",
+    architecture: "Architecture",
+    business: "Business",
+  };
+  return map[key] ?? null;
+}
 
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────
 function calcHealth(project: Project): "green" | "yellow" | "red" {
@@ -222,86 +491,113 @@ function calcHealth(project: Project): "green" | "yellow" | "red" {
   return "green";
 }
 function calcCompletion(p: Project): number {
-  return p.totalTasks > 0 ? Math.round((p.completedTasks / p.totalTasks) * 100) : 0;
+  const totalTasks = toFiniteNumber(p.totalTasks, 0);
+  const completedTasks = toFiniteNumber(p.completedTasks, 0);
+  return totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 }
 // Fix calcProductivityScore:
 function calcProductivityScore(p: Project): number {
-  if (!p) return 0;
   const comp = calcCompletion(p);
-  const commits = p.commits || 0;
-  const totalHours = p.totalHours || 0;
-  const bugsFixed = p.bugsFixed || 0;
-  const refactors = p.refactors || 0;
-
-  return Math.round(
-    comp * 0.25 +
-    Math.min(commits / 200, 1) * 25 +
-    Math.min(totalHours / 400, 1) * 25 +
-    Math.min(bugsFixed / 20, 1) * 15 +
-    Math.min(refactors / 15, 1) * 10
+  const score = Math.round(
+    comp * 0.25 + 
+    Math.min(toFiniteNumber(p.commits, 0) / 200, 1) * 25 + 
+    Math.min(toFiniteNumber(p.totalHours, 0) / 400, 1) * 25 + 
+    Math.min(toFiniteNumber(p.bugsFixed, 0) / 20, 1) * 15 + 
+    Math.min(toFiniteNumber(p.refactors, 0) / 15, 1) * 10
   );
+  return toFiniteNumber(score, 0);
 }
 // Also fix the calcLearningIntensity function:
 function calcLearningIntensity(p: Project): number {
   // Safely handle potential undefined values
-  const totalHours = p.totalHours || 0;
-  const learningPoints = p.learningPoints || 0;
+  const totalHours = toFiniteNumber(p.totalHours, 0);
+  const learningPoints = toFiniteNumber(p.learningPoints, 0);
   const pph = totalHours > 0 ? learningPoints / totalHours : 0;
-
+  
   const categories = p.learningEntries ? new Set(p.learningEntries.map(e => e.category)) : new Set();
   const div = categories.size;
-
-  const avg = p.learningEntries && p.learningEntries.length > 0
-    ? p.learningEntries.reduce((a, e) => a + (e.difficulty || 0), 0) / p.learningEntries.length
+  
+  const avg = p.learningEntries && p.learningEntries.length > 0 
+    ? p.learningEntries.reduce((a, e) => a + toFiniteNumber(e.difficulty, 0), 0) / p.learningEntries.length 
     : 0;
-
+    
   return Math.min(100, Math.round(pph * 20 + div * 8 + avg * 5));
 }
 // Fix calcMomentum:
 function calcMomentum(p: Project): number {
-  if (!p) return 0;
-  const weeklyHours = p.weeklyHours || [0, 0, 0, 0, 0, 0, 0];
-  const recent = weeklyHours.reduce((a, b) => a + (b || 0), 0);
-  const lastActive = p.lastActive ? new Date(p.lastActive) : new Date();
+  const weeklyHours = (p.weeklyHours || [0,0,0,0,0,0,0]).map((h) => toFiniteNumber(h, 0));
+  const recent = weeklyHours.reduce((a, b) => a + b, 0);
+  const lastActive = p.lastActive || new Date();
   const recency = Math.max(0, 1 - (Date.now() - lastActive.getTime()) / 86400000 / 14);
-  const commits = p.commits || 0;
-  return Math.min(100, Math.round((recent / 35) * 60 * recency + (commits / 200) * 40));
+  return Math.min(100, Math.round((recent / 35) * 60 * recency + (toFiniteNumber(p.commits, 0) / 200) * 40));
 }
 function getSkillDistribution(projects: Project[]): Record<string, number> {
   const d: Record<string, number> = {};
   SKILL_CATS.forEach(c => d[c] = 0);
-
-  if (Array.isArray(projects)) {
+  
+  // Safely check if projects exist and have learningEntries
+  if (projects && projects.length > 0) {
     projects.forEach(p => {
-      if (p && Array.isArray(p.learningEntries)) {
+      if (p.learningEntries && p.learningEntries.length > 0) {
         p.learningEntries.forEach(e => {
-          if (e && e.category && d[e.category] !== undefined) {
-            d[e.category] += (e.difficulty || 0) * 10;
+          const normalizedCategory = normalizeSkillCategory(e?.category);
+          if (normalizedCategory && d[normalizedCategory] !== undefined) {
+            d[normalizedCategory] += toFiniteNumber(e?.difficulty, 0) * 10;
           }
         });
       }
     });
   }
-
+  
   return d;
 }
 function getBurnoutRisk(p: Project): string {
-  if (!p || !p.weeklyHours) return "Low";
-  const h = p.weeklyHours.reduce((a, b) => a + (b || 0), 0);
+  const h = (p.weeklyHours || []).reduce((a, b) => a + toFiniteNumber(b, 0), 0);
   return h > 50 ? "High" : h > 35 ? "Medium" : "Low";
 }
 // Fix calcGitMetrics:
 function calcGitMetrics(p: Project) {
-  if (!p) return { commitsPerDay: 0, avgCommits: "0.0", prMergeRate: "0" };
-  const commitsByDay = Array.isArray(p.gitMetrics?.commitsByDay) ? p.gitMetrics.commitsByDay : [0, 0, 0, 0, 0, 0, 0];
-  const cpd = commitsByDay.reduce((a, b) => a + (b || 0), 0);
+  const commitsByDay = p.gitMetrics?.commitsByDay || [0,0,0,0,0,0,0];
+  const cpd = commitsByDay.reduce((a, b) => a + b, 0);
   const pullRequests = p.gitMetrics?.pullRequests || 0;
   const mergedPRs = p.gitMetrics?.mergedPRs || 0;
+  
+  return { 
+    commitsPerDay: cpd, 
+    avgCommits: (cpd / 7).toFixed(1), 
+    prMergeRate: pullRequests > 0 ? ((mergedPRs / pullRequests) * 100).toFixed(0) : "0" 
+  };
+}
+
+function getProjectWeeklyActivity(project: Project): { labels: string[]; data: number[] } {
+  const normalizedWeekly =
+    project.weeklyHours && project.weeklyHours.length === 7
+      ? project.weeklyHours.map((n) => toFiniteNumber(n, 0))
+      : [0, 0, 0, 0, 0, 0, 0];
+  const hasWeeklyFromApi = normalizedWeekly.some((n) => n > 0);
+  if (hasWeeklyFromApi) {
+    return { labels: WEEKLY_LABELS, data: normalizedWeekly };
+  }
+
+  const reports = project.dailyReports || [];
+
+  if (reports.length > 0) {
+    const totalsByWeekday = [0, 0, 0, 0, 0, 0, 0]; // Mon..Sun
+
+    reports.forEach((report) => {
+      if (!report?.date) return;
+      const day = new Date(report.date);
+      if (Number.isNaN(day.getTime())) return;
+      const weekdayIndex = day.getDay() === 0 ? 6 : day.getDay() - 1;
+      totalsByWeekday[weekdayIndex] += toFiniteNumber(report.hoursWorked, 0);
+    });
+
+    return { labels: WEEKLY_LABELS, data: totalsByWeekday };
+  }
 
   return {
-    commitsPerDay: cpd,
-    avgCommits: (cpd / 7).toFixed(1),
-    prMergeRate: pullRequests > 0 ? ((mergedPRs / pullRequests) * 100).toFixed(0) : "0"
+    labels: WEEKLY_LABELS,
+    data: normalizedWeekly,
   };
 }
 
@@ -330,22 +626,22 @@ function CircleProgress({ value, size = 80, stroke = 7, color = "#00FFB2", label
   const r = (size - stroke * 2) / 2;
   const circ = 2 * Math.PI * r;
   const offset = circ - (safeValue / 100) * circ;
-
+  
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1a1a2e" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={color}
+        <circle 
+          cx={size / 2} 
+          cy={size / 2} 
+          r={r} 
+          fill="none" 
+          stroke={color} 
           strokeWidth={stroke}
-          strokeDasharray={circ}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          style={{ transition: "stroke-dashoffset 1s ease" }}
+          strokeDasharray={circ} 
+          strokeDashoffset={offset} 
+          strokeLinecap="round" 
+          style={{ transition: "stroke-dashoffset 1s ease" }} 
         />
       </svg>
       <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -357,25 +653,28 @@ function CircleProgress({ value, size = 80, stroke = 7, color = "#00FFB2", label
 }
 
 // Fix WeeklyChart to handle empty data:
-function WeeklyChart({ data, color }: { data: number[]; color: string }) {
-  const safeData = Array.isArray(data) && data.length > 0 ? data : [0, 0, 0, 0, 0, 0, 0];
-  const max = Math.max(...safeData.map(v => v || 0), 1);
+function WeeklyChart({ data, labels = WEEKLY_LABELS, color }: { data: number[]; labels?: string[]; color: string }) {
+  const rawData = data && data.length > 0 ? data : [0,0,0,0,0,0,0];
+  const safeData = rawData.map((v) => toFiniteNumber(v, 0));
+  const safeLabels = labels && labels.length === safeData.length ? labels : WEEKLY_LABELS;
+  const max = Math.max(...safeData, 1);
   return (
-    <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 60 }}>
+    <div style={{ display: "flex", gap: 4, alignItems: "stretch", height: 80 }}>
       {safeData.map((val, i) => (
-        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+        <div key={i} style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          <span style={{ fontSize: 8, color: "#777", fontFamily: "monospace", lineHeight: 1 }}>{val.toFixed(1)}h</span>
           <div style={{ width: "100%", flex: 1, display: "flex", alignItems: "flex-end" }}>
-            <div style={{
-              width: "100%",
-              height: `${((val || 0) / max) * 100}%`,
-              minHeight: (val || 0) > 0 ? 3 : 0,
-              background: color,
-              borderRadius: "3px 3px 0 0",
-              opacity: 0.85,
-              transition: "height 0.8s ease"
+            <div style={{ 
+              width: "100%", 
+              height: `${(val / max) * 100}%`, 
+              minHeight: val > 0 ? 3 : 0, 
+              background: color, 
+              borderRadius: "3px 3px 0 0", 
+              opacity: 0.85, 
+              transition: "height 0.8s ease" 
             }} />
           </div>
-          <span style={{ fontSize: 8, color: "#555", fontFamily: "monospace" }}>{WEEKLY_LABELS[i]}</span>
+          <span style={{ fontSize: 8, color: "#555", fontFamily: "monospace" }}>{safeLabels[i]}</span>
         </div>
       ))}
     </div>
@@ -475,13 +774,14 @@ function Spinner({ size = 32, color = "#00FFB2" }: { size?: number; color?: stri
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, onClick, onDelete }: { project: Project; onClick: (p: Project) => void; onDelete: (id: number) => void }) {
+function ProjectCard({ project, onClick, onDelete, onExport }: { project: Project; onClick: (p: Project) => void; onDelete: (id: number) => void; onExport: (id: number) => Promise<boolean> }) {
   const health = calcHealth(project);
   const completion = calcCompletion(project);
   const productivity = calcProductivityScore(project);
   const learning = calcLearningIntensity(project);
   const momentum = calcMomentum(project);
   const burnout = getBurnoutRisk(project);
+  const weeklyActivity = getProjectWeeklyActivity(project);
   const burnoutColors: Record<string, string> = { Low: "#00FFB2", Medium: "#FFD700", High: "#FF4444" };
   const daysSince = Math.floor((Date.now() - project.lastActive.getTime()) / 86400000);
 
@@ -510,9 +810,16 @@ function ProjectCard({ project, onClick, onDelete }: { project: Project; onClick
             { icon: "🚀", label: "Momentum", val: momentum }
           ].map(({ icon, label, val }) => (
             <div key={label} style={{ flex: 1, minWidth: 70 }}>
+              {(() => {
+                const safeVal = toFiniteNumber(val, 0);
+                return (
+                  <>
               <div style={{ fontSize: 9, color: "#444", marginBottom: 3, fontFamily: "monospace" }}>{icon} {label}</div>
-              <MiniBar value={val} max={100} color={project.color} height={5} />
-              <div style={{ fontSize: 10, color: "#666", marginTop: 2, fontFamily: "monospace" }}>{val}</div>
+              <MiniBar value={safeVal} max={100} color={project.color} height={5} />
+              <div style={{ fontSize: 10, color: "#666", marginTop: 2, fontFamily: "monospace" }}>{safeVal}</div>
+                  </>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -526,13 +833,13 @@ function ProjectCard({ project, onClick, onDelete }: { project: Project; onClick
             { label: "PRs", value: project.gitMetrics.pullRequests }
           ].map(({ label, value }) => (
             <div key={label} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#ccc", fontFamily: "monospace" }}>{value}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#ccc", fontFamily: "monospace" }}>{toFiniteNumber(value, 0)}</div>
               <div style={{ fontSize: 9, color: "#444", textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
             </div>
           ))}
         </div>
 
-        <WeeklyChart data={project.weeklyHours} color={project.color} />
+        <WeeklyChart data={weeklyActivity.data} labels={weeklyActivity.labels} color={project.color} />
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -543,6 +850,12 @@ function ProjectCard({ project, onClick, onDelete }: { project: Project; onClick
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 9, color: burnoutColors[burnout], fontFamily: "monospace" }}>🔥 {burnout}</span>
+          <button
+            onClick={async (e) => { e.stopPropagation(); await onExport(project.id); }}
+            style={{ background: "transparent", border: `1px solid ${project.color}44`, color: project.color, padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 9, fontFamily: "monospace" }}
+          >
+            Convert & Download
+          </button>
           <button onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${project.name}"?`)) onDelete(project.id); }}
             style={{ background: "transparent", border: "1px solid #FF444444", color: "#FF4444", padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 9, fontFamily: "monospace" }}>
             ✕
@@ -568,8 +881,8 @@ const inputStyle: React.CSSProperties = { width: "100%", background: "#080810", 
 const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
 const labelStyle: React.CSSProperties = { fontSize: 10, color: "#555", display: "block", marginBottom: 4, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: 1 };
 
-function AddProjectModal({ onClose, onSave, saving }: { onClose: () => void; onSave: (p: CreateProjectPayload & { techStack: string[] }) => void; saving: boolean }) {
-  const [form, setForm] = useState({ name: "", category: CATEGORIES[0], color: COLORS[0], techStack: "", totalTasks: 0, repoUrl: "" });
+function AddProjectModal({ onClose, onSave, saving }: { onClose: () => void; onSave: (p: CreateProjectPayload) => void; saving: boolean }) {
+  const [form, setForm] = useState({ name: "", category: CATEGORIES[0], color: COLORS[0], techStack: "", gitRepo: "", totalTasks: 0 });
   return (
     <ModalOverlay onClose={onClose}>
       <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 16, padding: 28, width: 520, maxWidth: "90vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -603,7 +916,7 @@ function AddProjectModal({ onClose, onSave, saving }: { onClose: () => void; onS
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Git Repository URL</label>
-          <input value={form.repoUrl} onChange={e => setForm({ ...form, repoUrl: e.target.value })} placeholder="e.g., https://github.com/user/repo" style={inputStyle} />
+          <input value={form.gitRepo} onChange={e => setForm({ ...form, gitRepo: e.target.value })} placeholder="https://github.com/user/repo" style={inputStyle} />
         </div>
         <div style={{ marginBottom: 20 }}>
           <label style={labelStyle}>Estimated Total Tasks</label>
@@ -612,13 +925,13 @@ function AddProjectModal({ onClose, onSave, saving }: { onClose: () => void; onS
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "#111122", border: "1px solid #1a1a2e", color: "#666", padding: "8px 18px", borderRadius: 8, cursor: "pointer", fontFamily: "monospace" }}>Cancel</button>
           <button disabled={saving || !form.name.trim()} onClick={() => {
-            if (form.name.trim()) onSave({
-              name: form.name.trim(),
-              category: form.category,
-              color: form.color,
-              techStack: form.techStack.split(",").map((s: string) => s.trim()).filter(s => s),
-              totalTasks: form.totalTasks,
-              repoUrl: form.repoUrl
+            if (form.name.trim()) onSave({ 
+              name: form.name.trim(), 
+              category: form.category, 
+              color: form.color, 
+              techStack: form.techStack.split(",").map(s => s.trim()).filter(s => s), 
+              git_repo: form.gitRepo.trim() || undefined,
+              totalTasks: form.totalTasks 
             });
           }} style={{ background: saving ? "#555" : form.color, border: "none", color: "#000", padding: "8px 18px", borderRadius: 8, cursor: saving ? "wait" : "pointer", fontWeight: 700, fontFamily: "monospace", opacity: saving ? 0.6 : 1 }}>
             {saving ? "Creating..." : "Create Project"}
@@ -653,15 +966,15 @@ function AddLearningModal({ project, onClose, onSave, saving }: { project: Proje
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "#111122", border: "1px solid #1a1a2e", color: "#666", padding: "8px 18px", borderRadius: 8, cursor: "pointer", fontFamily: "monospace" }}>Cancel</button>
           <button disabled={saving || !form.concept.trim()} onClick={() => {
-            if (form.concept.trim()) onSave({
-              concept: form.concept.trim(),
-              category: form.category,
-              difficulty: form.difficulty,
-              type: form.type,
-              confidence: form.confidence,
-              dateLogged: form.dateLogged,
-              timeSpent: form.timeSpent,
-              resources: form.resources.split(",").map(r => r.trim()).filter(r => r)
+            if (form.concept.trim()) onSave({ 
+              concept: form.concept.trim(), 
+              category: form.category, 
+              difficulty: form.difficulty, 
+              type: form.type, 
+              confidence: form.confidence, 
+              dateLogged: form.dateLogged, 
+              timeSpent: form.timeSpent, 
+              resources: form.resources.split(",").map(r => r.trim()).filter(r => r) 
             });
           }} style={{ background: saving ? "#555" : project.color, border: "none", color: "#000", padding: "8px 18px", borderRadius: 8, cursor: saving ? "wait" : "pointer", fontWeight: 700, fontFamily: "monospace", opacity: saving ? 0.6 : 1 }}>
             {saving ? "Saving..." : "Save Entry"}
@@ -771,6 +1084,49 @@ function AddGoalModal({ project, onClose, onSave, saving }: { project: Project; 
   );
 }
 
+function EditGoalModal({ project, goal, onClose, onSave, saving }: { project: Project; goal: GoalDTO; onClose: () => void; onSave: (g: GoalDTO) => void; saving: boolean }) {
+  const [form, setForm] = useState({
+    title: goal.title,
+    target: goal.target,
+    current: goal.current,
+    category: goal.category,
+  });
+  const goalCategories = ["Learning", "Quality", "Delivery", "Performance", "DevOps"];
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 16, padding: 28, width: 440, maxWidth: "90vw" }}>
+        <h3 style={{ margin: "0 0 20px", color: "#e0e0e0", fontFamily: "monospace", fontSize: 16 }}>✏️ Edit Goal</h3>
+        <div style={{ marginBottom: 14 }}><label style={labelStyle}>Goal Title *</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} style={inputStyle} /></div>
+        <div style={{ marginBottom: 14 }}><label style={labelStyle}>Category</label><select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={selectStyle}>{goalCategories.map(c => <option key={c}>{c}</option>)}</select></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+          <div><label style={labelStyle}>Target</label><input type="number" min={1} value={form.target} onChange={e => setForm({ ...form, target: +e.target.value })} style={inputStyle} /></div>
+          <div><label style={labelStyle}>Current</label><input type="number" min={0} value={form.current} onChange={e => setForm({ ...form, current: +e.target.value })} style={inputStyle} /></div>
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ background: "#111122", border: "1px solid #1a1a2e", color: "#666", padding: "8px 18px", borderRadius: 8, cursor: "pointer", fontFamily: "monospace" }}>Cancel</button>
+          <button
+            disabled={saving || !form.title.trim()}
+            onClick={() => {
+              if (!form.title.trim()) return;
+              onSave({
+                ...goal,
+                title: form.title.trim(),
+                target: Math.max(1, form.target),
+                current: Math.max(0, form.current),
+                category: form.category,
+              });
+            }}
+            style={{ background: saving ? "#555" : project.color, border: "none", color: "#000", padding: "8px 18px", borderRadius: 8, cursor: saving ? "wait" : "pointer", fontWeight: 700, fontFamily: "monospace", opacity: saving ? 0.6 : 1 }}
+          >
+            {saving ? "Saving..." : "Update Goal"}
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+}
+
 // ─── API CONFIG MODAL ─────────────────────────────────────────────────────────
 
 function ApiConfigModal({ onClose, onSave, currentUrl }: { onClose: () => void; onSave: (url: string) => void; currentUrl: string }) {
@@ -808,8 +1164,6 @@ function ApiConfigModal({ onClose, onSave, currentUrl }: { onClose: () => void; 
 // ─── GIT METRICS VIEW ─────────────────────────────────────────────────────────
 
 function GitMetricsView({ project }: { project: Project }) {
-  if (!project || !project.gitMetrics) return <div style={{ color: "#444", padding: 20 }}>No Git data available.</div>;
-
   const gm = project.gitMetrics;
   const { commitsPerDay, avgCommits, prMergeRate } = calcGitMetrics(project);
   return (
@@ -817,16 +1171,16 @@ function GitMetricsView({ project }: { project: Project }) {
       <div style={{ fontSize: 14, color: "#e0e0e0", fontFamily: "monospace", fontWeight: 600, marginBottom: 16 }}>📊 Git Metrics</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
         <StatCard label="Weekly Commits" value={commitsPerDay} sub={`avg: ${avgCommits}/day`} accent={project.color} />
-        <StatCard label="Pull Requests" value={gm.pullRequests || 0} sub={`${gm.mergedPRs || 0} merged`} accent="#38BDF8" />
-        <StatCard label="Merge Rate" value={`${prMergeRate || 0}%`} sub="quality" accent="#A78BFA" />
-        <StatCard label="Code Reviews" value={gm.codeReviews || 0} sub="conducted" accent="#FFD700" />
+        <StatCard label="Pull Requests" value={gm.pullRequests} sub={`${gm.mergedPRs} merged`} accent="#38BDF8" />
+        <StatCard label="Merge Rate" value={`${prMergeRate}%`} sub="quality" accent="#A78BFA" />
+        <StatCard label="Code Reviews" value={gm.codeReviews} sub="conducted" accent="#FFD700" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 10, padding: 14 }}>
           <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", marginBottom: 10 }}>COMMITS BY DAY</div>
           <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 60 }}>
-            {(gm.commitsByDay || [0, 0, 0, 0, 0, 0, 0]).map((val, i) => {
-              const max = Math.max(...(gm.commitsByDay || [0, 0, 0, 0, 0, 0, 0]), 1);
+            {gm.commitsByDay.map((val, i) => {
+              const max = Math.max(...gm.commitsByDay, 1);
               return (
                 <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                   <div style={{ width: "100%", height: 40, display: "flex", alignItems: "flex-end" }}>
@@ -840,7 +1194,7 @@ function GitMetricsView({ project }: { project: Project }) {
         </div>
         <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 10, padding: 14 }}>
           <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", marginBottom: 10 }}>LANGUAGES</div>
-          {gm.languages && Object.entries(gm.languages).length > 0 ? Object.entries(gm.languages).map(([lang, pct]) => (
+          {Object.entries(gm.languages).length > 0 ? Object.entries(gm.languages).map(([lang, pct]) => (
             <div key={lang} style={{ marginBottom: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                 <span style={{ fontSize: 11, color: "#ccc" }}>{lang}</span>
@@ -855,7 +1209,7 @@ function GitMetricsView({ project }: { project: Project }) {
         <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 10, padding: 14, marginTop: 12 }}>
           <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", marginBottom: 10 }}>RECENT COMMITS</div>
           {gm.commitMessages.slice(0, 5).map((msg, i) => (
-            <div key={i} style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", padding: "6px 8px", background: "#0d0d1a", borderRadius: 4, borderLeft: `2px solid ${project.color}`, marginBottom: 4 }}>{msg || "No message"}</div>
+            <div key={i} style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", padding: "6px 8px", background: "#0d0d1a", borderRadius: 4, borderLeft: `2px solid ${project.color}`, marginBottom: 4 }}>{msg}</div>
           ))}
         </div>
       )}
@@ -865,19 +1219,23 @@ function GitMetricsView({ project }: { project: Project }) {
 
 // ─── PROJECT DETAIL ───────────────────────────────────────────────────────────
 
-function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteReport, onDeleteDoc, onDeleteGoal, onCreateLearning, onCreateReport, onCreateDoc, onCreateGoal, saving }: {
+function ProjectDetail({ project, onClose, onSave, onCreateLearning, onCreateReport, onCreateDoc, onCreateGoal, onExportProject, onFetchGitData, onUpdateGoal, onDeleteLearning, onDeleteReport, onDeleteDoc, onDeleteGoal, saving, fetchingGit }: {
   project: Project;
   onClose: () => void;
   onSave: (updated: Project) => void;
-  onDeleteLearning: (projectId: number, entryId: number) => void;
-  onDeleteReport: (projectId: number, reportId: number) => void;
-  onDeleteDoc: (projectId: number, docId: number) => void;
-  onDeleteGoal: (projectId: number, goalId: number) => void;
   onCreateLearning: (projectId: number, payload: CreateLearningEntryPayload) => void;
   onCreateReport: (projectId: number, payload: CreateDailyReportPayload) => void;
   onCreateDoc: (projectId: number, payload: CreateDocumentPayload) => void;
   onCreateGoal: (projectId: number, payload: CreateGoalPayload) => void;
+  onExportProject: (projectId: number) => Promise<boolean>;
+  onFetchGitData: (projectId: number) => void;
+  onUpdateGoal: (projectId: number, goal: GoalDTO) => void;
+  onDeleteLearning: (projectId: number, entryId: number) => void;
+  onDeleteReport: (projectId: number, reportId: number) => void;
+  onDeleteDoc: (projectId: number, docId: number) => void;
+  onDeleteGoal: (projectId: number, goalId: number) => void;
   saving: boolean;
+  fetchingGit: boolean;
 }) {
   const health = calcHealth(project);
   const completion = calcCompletion(project);
@@ -889,12 +1247,24 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
   const [showDailyReport, setShowDailyReport] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
   const [showGoalModal, setShowGoalModal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<GoalDTO | null>(null);
   const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
+  const [gitRepoInput, setGitRepoInput] = useState(project.git_repo || "");
+  const [exporting, setExporting] = useState(false);
+  const [exportReady, setExportReady] = useState(false);
+
+  useEffect(() => {
+    setGitRepoInput(project.git_repo || "");
+  }, [project.git_repo, project.id]);
+  useEffect(() => {
+    setExportReady(false);
+  }, [project.id]);
 
   const confColors: Record<string, string> = { Low: "#FF4444", Medium: "#FFD700", High: "#00FFB2" };
   const typeIcons: Record<string, string> = { "New concept": "💡", "Mistake learned": "🔥", "Deepened knowledge": "📈", "Optimization": "⚡" };
   const moodEmoji: Record<string, string> = { productive: "💪", focused: "🎯", tired: "😴", distracted: "🌀", stressed: "😰" };
   const statusColors: Record<string, string> = { draft: "#FF6B35", "in-progress": "#FFD700", complete: "#00FFB2" };
+  const weeklyActivity = getProjectWeeklyActivity(project);
 
   return (
     <div style={{ padding: "0 0 40px" }}>
@@ -903,14 +1273,7 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
           <div style={{ width: 4, height: 32, background: project.color, borderRadius: 2 }} />
           <div>
             <h2 style={{ margin: 0, fontSize: 22, color: "#e0e0e0", fontFamily: "monospace" }}>{project.name}</h2>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace" }}>{project.category} · ID: {project.id}</span>
-              {project.repoUrl && (
-                <a href={project.repoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: project.color, textDecoration: "none", fontFamily: "monospace", padding: "2px 6px", background: `${project.color}11`, borderRadius: 4, border: `1px solid ${project.color}33` }}>
-                  🔗 Repository
-                </a>
-              )}
-            </div>
+            <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace" }}>{project.category} · ID: {project.id}</span>
           </div>
         </div>
         <button onClick={onClose} style={{ background: "#111122", border: "1px solid #1a1a2e", color: "#666", padding: "6px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontFamily: "monospace" }}>← Back</button>
@@ -928,6 +1291,29 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
             padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontFamily: "monospace", fontSize: 12
           }}>{btn.label}</button>
         ))}
+        <button
+          disabled={exporting}
+          onClick={async () => {
+            setExporting(true);
+            const ok = await onExportProject(project.id);
+            if (ok) setExportReady(true);
+            setExporting(false);
+          }}
+          style={{
+            background: "#111122",
+            border: `1px solid ${project.color}44`,
+            color: project.color,
+            padding: "8px 16px",
+            borderRadius: 8,
+            cursor: exporting ? "wait" : "pointer",
+            fontWeight: 600,
+            fontFamily: "monospace",
+            fontSize: 12,
+            opacity: exporting ? 0.7 : 1,
+          }}
+        >
+          {exporting ? "Converting..." : exportReady ? "Download" : "Convert"}
+        </button>
       </div>
 
       {/* Health Banner */}
@@ -972,9 +1358,61 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
         ))}
       </div>
 
+      {/* Repository */}
+      <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10 }}>Git Repository</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center" }}>
+          <input
+            value={gitRepoInput}
+            onChange={(e) => setGitRepoInput(e.target.value)}
+            placeholder="https://github.com/user/repo"
+            style={inputStyle}
+          />
+          <button
+            onClick={() => onSave({ ...project, git_repo: gitRepoInput.trim() || undefined })}
+            disabled={saving}
+            style={{
+              background: saving ? "#555" : project.color,
+              border: "none",
+              color: "#000",
+              padding: "8px 14px",
+              borderRadius: 8,
+              cursor: saving ? "wait" : "pointer",
+              fontWeight: 700,
+              fontFamily: "monospace",
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            Save Repo
+          </button>
+          <button
+            onClick={() => onFetchGitData(project.id)}
+            disabled={fetchingGit}
+            style={{
+              background: fetchingGit ? "#555" : "#38BDF8",
+              border: "none",
+              color: "#000",
+              padding: "8px 14px",
+              borderRadius: 8,
+              cursor: fetchingGit ? "wait" : "pointer",
+              fontWeight: 700,
+              fontFamily: "monospace",
+              opacity: fetchingGit ? 0.7 : 1,
+            }}
+          >
+            {fetchingGit ? "Fetching..." : "Fetch Git Data"}
+          </button>
+        </div>
+        {project.git_repo && (
+          <a href={project.git_repo} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 10, color: project.color, fontSize: 12, fontFamily: "monospace" }}>
+            Open repository
+          </a>
+        )}
+      </div>
+
       <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>📈 Weekly Activity</div>
-        <WeeklyChart data={project.weeklyHours} color={project.color} />
+        <WeeklyChart data={weeklyActivity.data} labels={weeklyActivity.labels} color={project.color} />
       </div>
 
       <GitMetricsView project={project} />
@@ -1088,6 +1526,8 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 9, color: "#555", fontFamily: "monospace", background: "#080810", padding: "2px 6px", borderRadius: 3 }}>{goal.category}</span>
                   <span style={{ fontSize: 10, color: "#666", fontFamily: "monospace" }}>{goal.current}/{goal.target} ({pct}%)</span>
+                  <button onClick={() => setEditingGoal(goal)}
+                    style={{ background: "transparent", border: "1px solid #38BDF844", color: "#38BDF8", padding: "1px 5px", borderRadius: 3, cursor: "pointer", fontSize: 8 }}>edit</button>
                   <button onClick={() => { if (confirm("Delete this goal?")) onDeleteGoal(project.id, goal.id); }}
                     style={{ background: "transparent", border: "1px solid #FF444444", color: "#FF4444", padding: "1px 5px", borderRadius: 3, cursor: "pointer", fontSize: 8 }}>✕</button>
                 </div>
@@ -1136,6 +1576,18 @@ function ProjectDetail({ project, onClose, onSave, onDeleteLearning, onDeleteRep
             setShowGoalModal(false);
           }} />
       )}
+      {editingGoal && (
+        <EditGoalModal
+          project={project}
+          goal={editingGoal}
+          saving={saving}
+          onClose={() => setEditingGoal(null)}
+          onSave={(goal) => {
+            onUpdateGoal(project.id, goal);
+            setEditingGoal(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1147,14 +1599,30 @@ export function App() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>(DEFAULT_PROJECTS);
   const [filter, setFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [showNewProject, setShowNewProject] = useState(false);
   const [showApiConfig, setShowApiConfig] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("offline");
   const [saving, setSaving] = useState(false);
+  const [fetchingGitProjectId, setFetchingGitProjectId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3001/api");
+  const [apiBaseUrl, setApiBaseUrl] = useState(() => {
+    try {
+      return localStorage.getItem("pulseiq_api_base_url") || "http://localhost:3001/api";
+    } catch {
+      return "http://localhost:3001/api";
+    }
+  });
+  const [showEmiChat, setShowEmiChat] = useState(false);
+  const [emiInput, setEmiInput] = useState("");
+  const [emiSending, setEmiSending] = useState(false);
+  const [emiMessages, setEmiMessages] = useState<ChatMessage[]>([
+    { id: 1, role: "assistant", text: "Hi, I am emi. Ask me about your projects, reports, or progress." },
+  ]);
   const toastIdRef = useRef(0);
+  const emiMsgIdRef = useRef(1);
+  const emiEndRef = useRef<HTMLDivElement | null>(null);
 
   // ── Toast helpers ───────────────────────────────────────────────────────────
   const addToast = useCallback((message: string, type: Toast["type"]) => {
@@ -1166,6 +1634,78 @@ export function App() {
   const dismissToast = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  const buildEmiReply = useCallback((input: string): string => {
+    const text = input.toLowerCase();
+    const totalHours = projects.reduce((a, p) => a + (p.totalHours || 0), 0);
+    const totalReports = projects.reduce((a, p) => a + (p.dailyReports?.length || 0), 0);
+    const totalLearning = projects.reduce((a, p) => a + (p.learningEntries?.length || 0), 0);
+    const totalCommits = projects.reduce((a, p) => a + (p.commits || 0), 0);
+
+    if (text.includes("summary") || text.includes("status") || text.includes("overview")) {
+      return `You currently track ${projects.length} projects with ${totalHours}h logged, ${totalCommits} commits, ${totalReports} daily reports, and ${totalLearning} learning entries.`;
+    }
+    if (text.includes("hours")) {
+      return `Total hours logged across all projects: ${totalHours}h.`;
+    }
+    if (text.includes("report")) {
+      return `You have logged ${totalReports} daily reports so far.`;
+    }
+    if (text.includes("learning")) {
+      return `You have ${totalLearning} learning entries recorded across your projects.`;
+    }
+    if (text.includes("project")) {
+      const names = projects.slice(0, 4).map((p) => p.name).join(", ");
+      return projects.length > 0 ? `Current projects include: ${names}${projects.length > 4 ? ", ..." : ""}.` : "No projects found yet.";
+    }
+
+    return "I can help with project summaries, hours, reports, learning progress, and quick status checks.";
+  }, [projects]);
+
+  const sendEmiMessage = useCallback(async () => {
+    const trimmed = emiInput.trim();
+    if (!trimmed || emiSending) return;
+
+    const userMsg: ChatMessage = { id: ++emiMsgIdRef.current, role: "user", text: trimmed };
+    setEmiInput("");
+    setEmiMessages((prev) => [...prev, userMsg]);
+    setEmiSending(true);
+
+    try {
+      const apiMessages = [...emiMessages, userMsg]
+        .slice(-12)
+        .map((m) => ({ role: m.role, content: m.text }));
+
+      const response = await aiApi.chat({ messages: apiMessages });
+      const aiText =
+        response?.data?.choices?.[0]?.message?.content?.trim() ||
+        response?.data?.choices?.[0]?.text?.trim() ||
+        "";
+
+      const aiMsg: ChatMessage = {
+        id: ++emiMsgIdRef.current,
+        role: "assistant",
+        text: aiText || buildEmiReply(trimmed),
+      };
+
+      setEmiMessages((prev) => [...prev, aiMsg]);
+    } catch (err) {
+      console.error("AI chat request failed:", err);
+      const fallback: ChatMessage = {
+        id: ++emiMsgIdRef.current,
+        role: "assistant",
+        text: `${buildEmiReply(trimmed)}\n\n(Using offline fallback reply; AI endpoint unavailable.)`,
+      };
+      setEmiMessages((prev) => [...prev, fallback]);
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      setEmiSending(false);
+    }
+  }, [emiInput, emiSending, emiMessages, buildEmiReply]);
+
+  useEffect(() => {
+    emiEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [emiMessages, showEmiChat]);
 
   // ── API connection ──────────────────────────────────────────────────────────
   const connectToApi = useCallback(async (url?: string) => {
@@ -1181,11 +1721,17 @@ export function App() {
         setLoading(true);
         try {
           const response = await projectsApi.list();
-          const apiProjects = response.data.map(dtoToProject);
-          if (apiProjects.length > 0) {
-            setProjects(apiProjects);
-            addToast(`Loaded ${apiProjects.length} projects from API`, "info");
-          }
+          const raw = response as unknown as { data?: ProjectDTO[]; projects?: ProjectDTO[] } | ProjectDTO[];
+          const projectRows = Array.isArray(raw)
+            ? raw
+            : Array.isArray(raw.data)
+              ? raw.data
+              : Array.isArray(raw.projects)
+                ? raw.projects
+                : [];
+          const apiProjects = projectRows.map(dtoToProject);
+          setProjects(apiProjects);
+          addToast(`Loaded ${apiProjects.length} projects from API`, "info");
         } catch (err) {
           console.warn("Failed to fetch projects:", err);
           addToast("Using local data (API fetch failed)", "info");
@@ -1202,15 +1748,83 @@ export function App() {
     }
   }, [apiBaseUrl, addToast]);
 
+  const applyGitRefreshResponse = useCallback((projectId: number, payload: unknown): void => {
+    let refreshed: Project | null = null;
+
+    if (payload && typeof payload === "object") {
+      const obj = payload as Record<string, unknown>;
+      if (typeof obj.id === "number" && typeof obj.name === "string") {
+        refreshed = dtoToProject(payload as ProjectDTO);
+      } else {
+        const maybeGitMetrics = ("gitMetrics" in obj ? obj.gitMetrics : payload) as Partial<Project["gitMetrics"]> | undefined;
+        const normalized = normalizeGitMetrics(maybeGitMetrics);
+
+        setProjects((prev) =>
+          prev.map((p) => (p.id === projectId ? { ...p, gitMetrics: normalized, lastActive: new Date() } : p)),
+        );
+        setSelectedProject((prev) =>
+          prev && prev.id === projectId ? { ...prev, gitMetrics: normalized, lastActive: new Date() } : prev,
+        );
+        return;
+      }
+    }
+
+    if (refreshed) {
+      setProjects((prev) => prev.map((p) => (p.id === projectId ? refreshed! : p)));
+      setSelectedProject((prev) => (prev && prev.id === projectId ? refreshed : prev));
+    }
+  }, []);
+
+  const handleFetchGitData = useCallback(async (projectId: number) => {
+    if (syncStatus !== "synced") {
+      addToast("Connect to API to fetch git data", "info");
+      return;
+    }
+
+    setFetchingGitProjectId(projectId);
+    try {
+      const response = await projectsApi.getGitMetrics(projectId);
+      applyGitRefreshResponse(projectId, response.data);
+      addToast("Git data refreshed", "success");
+    } catch (err) {
+      console.error("Git refresh failed:", err);
+      addToast("Failed to fetch git data", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      setFetchingGitProjectId(null);
+    }
+  }, [syncStatus, addToast, applyGitRefreshResponse]);
+
   // Try connecting on mount
   useEffect(() => {
     connectToApi();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (syncStatus !== "synced" || !selectedProject?.id) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await projectsApi.get(selectedProject.id);
+        if (cancelled) return;
+        const refreshed = dtoToProject(response.data);
+        setProjects((prev) => prev.map((p) => (p.id === refreshed.id ? refreshed : p)));
+        setSelectedProject((prev) => (prev && prev.id === refreshed.id ? refreshed : prev));
+      } catch (err) {
+        console.warn("Project refresh with git failed:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProject?.id, syncStatus]);
+
   // ── CRUD Operations with API fallback ───────────────────────────────────────
 
-  const handleCreateProject = useCallback(async (payload: CreateProjectPayload & { techStack: string[] }) => {
+  const handleCreateProject = useCallback(async (payload: CreateProjectPayload) => {
     setSaving(true);
     try {
       if (syncStatus === "synced") {
@@ -1224,6 +1838,7 @@ export function App() {
           id: Date.now(), name: payload.name, category: payload.category, color: payload.color,
           totalTasks: payload.totalTasks, completedTasks: 0, features: 0, bugsFixed: 0, refactors: 0,
           totalHours: 0, activeDays: 0, lastActive: new Date(), commits: 0,
+          git_repo: payload.git_repo,
           techStack: payload.techStack, weeklyHours: [0, 0, 0, 0, 0, 0, 0],
           monthlyHours: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
           learningPoints: 0, learningEntries: [],
@@ -1240,6 +1855,7 @@ export function App() {
         id: Date.now(), name: payload.name, category: payload.category, color: payload.color,
         totalTasks: payload.totalTasks, completedTasks: 0, features: 0, bugsFixed: 0, refactors: 0,
         totalHours: 0, activeDays: 0, lastActive: new Date(), commits: 0,
+        git_repo: payload.git_repo,
         techStack: payload.techStack, weeklyHours: [0, 0, 0, 0, 0, 0, 0],
         monthlyHours: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         learningPoints: 0, learningEntries: [],
@@ -1266,7 +1882,7 @@ export function App() {
           features: dto.features, bugsFixed: dto.bugsFixed, refactors: dto.refactors,
           totalHours: dto.totalHours, activeDays: dto.activeDays,
           lastActive: dto.lastActive, commits: dto.commits,
-          techStack: dto.techStack, weeklyHours: dto.weeklyHours,
+          techStack: dto.techStack, git_repo: dto.git_repo, weeklyHours: dto.weeklyHours,
           monthlyHours: dto.monthlyHours, learningPoints: dto.learningPoints,
         };
         await projectsApi.update(updated.id, updatePayload);
@@ -1281,6 +1897,197 @@ export function App() {
     } finally {
       setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
       setSelectedProject(updated);
+      setSaving(false);
+    }
+  }, [syncStatus, addToast]);
+
+  const handleExportProject = useCallback(async (projectId: number): Promise<boolean> => {
+    try {
+      let dto: ProjectDTO | null = null;
+      try {
+        const response = await projectsApi.get(projectId);
+        dto = extractProjectDto(response);
+      } catch (err) {
+        console.warn("Project export fetch failed, using local data:", err);
+        const local = projects.find((p) => p.id === projectId);
+        if (local) dto = projectToDto(local);
+      }
+
+      if (!dto) {
+        addToast("Unable to load project data for export", "error");
+        return false;
+      }
+
+      downloadProjectExcel(dto);
+      addToast("Project converted and downloaded as Excel", "success");
+      return true;
+    } catch (err) {
+      console.error("Export project error:", err);
+      addToast("Failed to export project data", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+      return false;
+    }
+  }, [projects, addToast]);
+
+  const handleCreateLearning = useCallback(async (projectId: number, payload: CreateLearningEntryPayload) => {
+    setSaving(true);
+    let created: LearningEntryDTO = { id: Date.now(), ...payload };
+    let apiSynced = syncStatus === "synced";
+    try {
+      if (syncStatus === "synced") {
+        const response = await learningApi.create(projectId, payload);
+        created = response.data;
+      }
+    } catch (err) {
+      apiSynced = false;
+      console.error("Create learning error:", err);
+      addToast("Learning saved locally (API sync failed)", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      const now = new Date();
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId
+            ? {
+                ...p,
+                learningEntries: [...p.learningEntries, created],
+                learningPoints: p.learningPoints + payload.difficulty * 40,
+                lastActive: now,
+              }
+            : p,
+        ),
+      );
+      setSelectedProject((prev) =>
+        prev && prev.id === projectId
+          ? {
+              ...prev,
+              learningEntries: [...prev.learningEntries, created],
+              learningPoints: prev.learningPoints + payload.difficulty * 40,
+              lastActive: now,
+            }
+          : prev,
+      );
+      if (apiSynced || syncStatus !== "synced") {
+        addToast(apiSynced ? "Learning entry added (synced)" : "Learning entry added (offline)", "success");
+      }
+      setSaving(false);
+    }
+  }, [syncStatus, addToast]);
+
+  const handleCreateReport = useCallback(async (projectId: number, payload: CreateDailyReportPayload) => {
+    setSaving(true);
+    let created: DailyReportDTO = { id: Date.now(), ...payload };
+    let apiSynced = syncStatus === "synced";
+    try {
+      if (syncStatus === "synced") {
+        const response = await reportsApi.create(projectId, payload);
+        created = response.data;
+      }
+    } catch (err) {
+      apiSynced = false;
+      console.error("Create report error:", err);
+      addToast("Report saved locally (API sync failed)", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      const dayOfWeek = new Date(payload.date).getDay();
+      const weekIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const now = new Date();
+      setProjects((prev) =>
+        prev.map((p) => {
+          if (p.id !== projectId) return p;
+          const newWeekly = [...p.weeklyHours];
+          newWeekly[weekIdx] += payload.hoursWorked;
+          return {
+            ...p,
+            dailyReports: [...p.dailyReports, created],
+            totalHours: p.totalHours + payload.hoursWorked,
+            completedTasks: p.completedTasks + payload.tasksDone,
+            weeklyHours: newWeekly,
+            activeDays: p.activeDays + 1,
+            lastActive: now,
+          };
+        }),
+      );
+      setSelectedProject((prev) => {
+        if (!prev || prev.id !== projectId) return prev;
+        const newWeekly = [...prev.weeklyHours];
+        newWeekly[weekIdx] += payload.hoursWorked;
+        return {
+          ...prev,
+          dailyReports: [...prev.dailyReports, created],
+          totalHours: prev.totalHours + payload.hoursWorked,
+          completedTasks: prev.completedTasks + payload.tasksDone,
+          weeklyHours: newWeekly,
+          activeDays: prev.activeDays + 1,
+          lastActive: now,
+        };
+      });
+      if (apiSynced || syncStatus !== "synced") {
+        addToast(apiSynced ? "Report added (synced)" : "Report added (offline)", "success");
+      }
+      setSaving(false);
+    }
+  }, [syncStatus, addToast]);
+
+  const handleCreateDoc = useCallback(async (projectId: number, payload: CreateDocumentPayload) => {
+    setSaving(true);
+    const wordCount = payload.content.trim().split(/\s+/).length;
+    const sections = Math.max(1, payload.content.split("\n\n").filter((s) => s.trim()).length);
+    let created: DocumentationDTO = { id: Date.now(), ...payload, wordCount, sections };
+    let apiSynced = syncStatus === "synced";
+    try {
+      if (syncStatus === "synced") {
+        const response = await docsApi.create(projectId, payload);
+        created = response.data;
+      }
+    } catch (err) {
+      apiSynced = false;
+      console.error("Create document error:", err);
+      addToast("Document saved locally (API sync failed)", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      const now = new Date();
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId ? { ...p, documentation: [...p.documentation, created], lastActive: now } : p,
+        ),
+      );
+      setSelectedProject((prev) =>
+        prev && prev.id === projectId
+          ? { ...prev, documentation: [...prev.documentation, created], lastActive: now }
+          : prev,
+      );
+      if (apiSynced || syncStatus !== "synced") {
+        addToast(apiSynced ? "Document added (synced)" : "Document added (offline)", "success");
+      }
+      setSaving(false);
+    }
+  }, [syncStatus, addToast]);
+
+  const handleCreateGoal = useCallback(async (projectId: number, payload: CreateGoalPayload) => {
+    setSaving(true);
+    let created: GoalDTO = { id: Date.now(), ...payload };
+    let apiSynced = syncStatus === "synced";
+    try {
+      if (syncStatus === "synced") {
+        const response = await goalsApi.create(projectId, payload);
+        created = response.data;
+      }
+    } catch (err) {
+      apiSynced = false;
+      console.error("Create goal error:", err);
+      addToast("Goal saved locally (API sync failed)", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, goals: [...p.goals, created] } : p)),
+      );
+      setSelectedProject((prev) =>
+        prev && prev.id === projectId ? { ...prev, goals: [...prev.goals, created] } : prev,
+      );
+      if (apiSynced || syncStatus !== "synced") {
+        addToast(apiSynced ? "Goal added (synced)" : "Goal added (offline)", "success");
+      }
       setSaving(false);
     }
   }, [syncStatus, addToast]);
@@ -1347,28 +2154,61 @@ export function App() {
     addToast("Goal deleted", "info");
   }, [syncStatus, addToast]);
 
-  // ── Computed values ─────────────────────────────────────────────────────────
-  const totalHours = projects?.reduce((a, p) => a + (p.totalHours || 0), 0) || 0;
-  const totalCommits = projects?.reduce((a, p) => a + (p.commits || 0), 0) || 0;
-  const totalLearning = projects?.reduce((a, p) => a + (p.learningPoints || 0), 0) || 0;
-  const totalPRs = projects?.reduce((a, p) => a + (p.gitMetrics?.pullRequests || 0), 0) || 0;
-  const overallProductivity = projects && projects.length > 0
-    ? Math.round(projects.reduce((a, p) => a + calcProductivityScore(p), 0) / projects.length)
-    : 0;
-  const skillDist = getSkillDistribution(projects || []);
-  const sortedSkills = Object.entries(skillDist).sort((a, b) => b[1] - a[1]);
-  const strongestSkill = sortedSkills[0];
-  const weakestSkill = sortedSkills[sortedSkills.length - 1];
-  const totalLearningEntries = projects?.reduce((a, p) => a + (p.learningEntries?.length || 0), 0) || 0;
-  const totalDocs = projects?.reduce((a, p) => a + (p.documentation?.length || 0), 0) || 0;
-  const totalDailyReports = projects?.reduce((a, p) => a + (p.dailyReports?.length || 0), 0) || 0;
+  const handleUpdateGoal = useCallback(async (projectId: number, goal: GoalDTO) => {
+    try {
+      if (syncStatus === "synced") {
+        await goalsApi.update(projectId, goal.id, {
+          title: goal.title,
+          target: goal.target,
+          current: goal.current,
+          category: goal.category,
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      if (err instanceof NetworkError) setSyncStatus("offline");
+      addToast("Saved goal locally (API sync failed)", "error");
+    }
 
-  const filteredProjects = Array.isArray(projects) ? (
-    filter === "all" ? projects :
-      filter === "active" ? projects.filter(p => p && calcHealth(p) === "green") :
-        filter === "warning" ? projects.filter(p => p && calcHealth(p) !== "green") :
-          projects
-  ) : [];
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === projectId ? { ...p, goals: p.goals.map((g) => (g.id === goal.id ? goal : g)) } : p,
+      ),
+    );
+    setSelectedProject((prev) =>
+      prev && prev.id === projectId
+        ? { ...prev, goals: prev.goals.map((g) => (g.id === goal.id ? goal : g)) }
+        : prev,
+    );
+    addToast("Goal updated", "success");
+  }, [syncStatus, addToast]);
+
+  // ── Computed values ─────────────────────────────────────────────────────────
+ const totalHours = projects?.reduce((a, p) => a + (p.totalHours || 0), 0) || 0;
+const totalCommits = projects?.reduce((a, p) => a + (p.commits || 0), 0) || 0;
+const totalLearning = projects?.reduce((a, p) => a + (p.learningPoints || 0), 0) || 0;
+const totalPRs = projects?.reduce((a, p) => a + (p.gitMetrics?.pullRequests || 0), 0) || 0;
+const overallProductivity = projects && projects.length > 0 
+  ? Math.round(projects.reduce((a, p) => a + calcProductivityScore(p), 0) / projects.length) 
+  : 0;
+  const skillDist = getSkillDistribution(projects || []);
+const sortedSkills = Object.entries(skillDist).sort((a, b) => b[1] - a[1]);
+const strongestSkill = sortedSkills[0];
+const weakestSkill = sortedSkills[sortedSkills.length - 1];
+const totalLearningEntries = projects?.reduce((a, p) => a + (p.learningEntries?.length || 0), 0) || 0;
+  const totalDocs = projects?.reduce((a, p) => a + (p.documentation?.length || 0), 0) || 0;
+const totalDailyReports = projects?.reduce((a, p) => a + (p.dailyReports?.length || 0), 0) || 0;
+
+const filteredByStatus = !projects ? [] : (
+  filter === "all" ? projects :
+  filter === "active" ? projects.filter(p => calcHealth(p) === "green") :
+  filter === "warning" ? projects.filter(p => calcHealth(p) !== "green") :
+  projects
+);
+
+const filteredProjects = categoryFilter === "all"
+  ? filteredByStatus
+  : filteredByStatus.filter((p) => p.category === categoryFilter);
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: "⬡" },
@@ -1378,207 +2218,6 @@ export function App() {
     { id: "docs", label: "Docs", icon: "📝" },
     { id: "git", label: "Git Stats", icon: "📊" },
   ];
-  const handleCreateLearning = useCallback(async (projectId: number, payload: CreateLearningEntryPayload) => {
-    setSaving(true);
-    try {
-      if (syncStatus === "synced") {
-        const response = await learningApi.create(projectId, payload);
-        const newEntry = response.data;
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          learningEntries: [...p.learningEntries, newEntry],
-          learningPoints: p.learningPoints + payload.difficulty * 40,
-          lastActive: new Date()
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          learningEntries: [...prev.learningEntries, newEntry],
-          learningPoints: prev.learningPoints + payload.difficulty * 40,
-          lastActive: new Date()
-        } : prev);
-        addToast("Learning entry synced", "success");
-      } else {
-        const newEntry: LearningEntryDTO = { id: Date.now(), ...payload };
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          learningEntries: [...p.learningEntries, newEntry],
-          learningPoints: p.learningPoints + payload.difficulty * 40,
-          lastActive: new Date()
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          learningEntries: [...prev.learningEntries, newEntry],
-          learningPoints: prev.learningPoints + payload.difficulty * 40,
-          lastActive: new Date()
-        } : prev);
-        addToast("Learning entry saved locally", "info");
-      }
-    } catch (err) {
-      console.error(err);
-      addToast("Failed to sync learning entry", "error");
-    } finally {
-      setSaving(false);
-    }
-  }, [syncStatus, addToast]);
-
-  const handleCreateReport = useCallback(async (projectId: number, payload: CreateDailyReportPayload) => {
-    setSaving(true);
-    try {
-      if (syncStatus === "synced") {
-        const response = await reportsApi.create(projectId, payload);
-        const newReport = response.data;
-        setProjects(prev => prev.map(p => {
-          if (p.id !== projectId) return p;
-          const dayOfWeek = new Date(payload.date).getDay();
-          const weekIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-          const newWeekly = [...p.weeklyHours];
-          newWeekly[weekIdx] += payload.hoursWorked;
-          return {
-            ...p,
-            dailyReports: [...p.dailyReports, newReport],
-            totalHours: p.totalHours + payload.hoursWorked,
-            completedTasks: p.completedTasks + payload.tasksDone,
-            weeklyHours: newWeekly,
-            activeDays: p.activeDays + 1,
-            lastActive: new Date()
-          };
-        }));
-        setSelectedProject(prev => {
-          if (!prev || prev.id !== projectId) return prev;
-          const dayOfWeek = new Date(payload.date).getDay();
-          const weekIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-          const newWeekly = [...prev.weeklyHours];
-          newWeekly[weekIdx] += payload.hoursWorked;
-          return {
-            ...prev,
-            dailyReports: [...prev.dailyReports, newReport],
-            totalHours: prev.totalHours + payload.hoursWorked,
-            completedTasks: prev.completedTasks + payload.tasksDone,
-            weeklyHours: newWeekly,
-            activeDays: prev.activeDays + 1,
-            lastActive: new Date()
-          };
-        });
-        addToast("Daily report synced", "success");
-      } else {
-        const newReport: DailyReportDTO = { id: Date.now(), ...payload };
-        setProjects(prev => prev.map(p => {
-          if (p.id !== projectId) return p;
-          const dayOfWeek = new Date(payload.date).getDay();
-          const weekIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-          const newWeekly = [...p.weeklyHours];
-          newWeekly[weekIdx] += payload.hoursWorked;
-          return {
-            ...p,
-            dailyReports: [...p.dailyReports, newReport],
-            totalHours: p.totalHours + payload.hoursWorked,
-            completedTasks: p.completedTasks + payload.tasksDone,
-            weeklyHours: newWeekly,
-            activeDays: p.activeDays + 1,
-            lastActive: new Date()
-          };
-        }));
-        setSelectedProject(prev => {
-          if (!prev || prev.id !== projectId) return prev;
-          const dayOfWeek = new Date(payload.date).getDay();
-          const weekIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-          const newWeekly = [...prev.weeklyHours];
-          newWeekly[weekIdx] += payload.hoursWorked;
-          return {
-            ...prev,
-            dailyReports: [...prev.dailyReports, newReport],
-            totalHours: prev.totalHours + payload.hoursWorked,
-            completedTasks: prev.completedTasks + payload.tasksDone,
-            weeklyHours: newWeekly,
-            activeDays: prev.activeDays + 1,
-            lastActive: new Date()
-          };
-        });
-        addToast("Daily report saved locally", "info");
-      }
-    } catch (err) {
-      console.error(err);
-      addToast("Failed to sync daily report", "error");
-    } finally {
-      setSaving(false);
-    }
-  }, [syncStatus, addToast]);
-
-  const handleCreateDoc = useCallback(async (projectId: number, payload: CreateDocumentPayload) => {
-    setSaving(true);
-    try {
-      if (syncStatus === "synced") {
-        const response = await docsApi.create(projectId, payload);
-        const newDoc = response.data;
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          documentation: [...p.documentation, newDoc],
-          lastActive: new Date()
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          documentation: [...prev.documentation, newDoc],
-          lastActive: new Date()
-        } : prev);
-        addToast("Document synced", "success");
-      } else {
-        const wordCount = payload.content.trim().split(/\s+/).length;
-        const sections = Math.max(1, payload.content.split("\n\n").filter(s => s.trim()).length);
-        const newDoc: DocumentationDTO = { id: Date.now(), ...payload, wordCount, sections };
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          documentation: [...p.documentation, newDoc],
-          lastActive: new Date()
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          documentation: [...prev.documentation, newDoc],
-          lastActive: new Date()
-        } : prev);
-        addToast("Document saved locally", "info");
-      }
-    } catch (err) {
-      console.error(err);
-      addToast("Failed to sync document", "error");
-    } finally {
-      setSaving(false);
-    }
-  }, [syncStatus, addToast]);
-
-  const handleCreateGoal = useCallback(async (projectId: number, payload: CreateGoalPayload) => {
-    setSaving(true);
-    try {
-      if (syncStatus === "synced") {
-        const response = await goalsApi.create(projectId, payload);
-        const newGoal = response.data;
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          goals: [...p.goals, newGoal]
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          goals: [...prev.goals, newGoal]
-        } : prev);
-        addToast("Goal synced", "success");
-      } else {
-        const newGoal: GoalDTO = { id: Date.now(), ...payload };
-        setProjects(prev => prev.map(p => p.id === projectId ? {
-          ...p,
-          goals: [...p.goals, newGoal]
-        } : p));
-        setSelectedProject(prev => prev && prev.id === projectId ? {
-          ...prev,
-          goals: [...prev.goals, newGoal]
-        } : prev);
-        addToast("Goal saved locally", "info");
-      }
-    } catch (err) {
-      console.error(err);
-      addToast("Failed to sync goal", "error");
-    } finally {
-      setSaving(false);
-    }
-  }, [syncStatus, addToast]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#04040d", fontFamily: "'Segoe UI', sans-serif", color: "#ccc", display: "flex" }}>
@@ -1664,7 +2303,7 @@ export function App() {
                   <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 20 }}>
                     <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20 }}>
                       <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 16 }}>Projects Overview</div>
-                      {Array.isArray(projects) && projects.map(p => (
+                      {projects.map(p => (
                         <div key={p.id} onClick={() => { setSelectedProject(p); setView("projects"); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 12px", borderRadius: 8, background: "#080810", border: "1px solid #111122" }}>
                           <HealthDot health={calcHealth(p)} />
                           <span style={{ fontSize: 12, color: "#ccc", width: 100, fontWeight: 600 }}>{p.name}</span>
@@ -1672,7 +2311,7 @@ export function App() {
                           <span style={{ fontSize: 10, color: p.color, fontFamily: "monospace", minWidth: 40, textAlign: "right" }}>{calcCompletion(p)}%</span>
                         </div>
                       ))}
-                      {(!Array.isArray(projects) || projects.length === 0) && <div style={{ color: "#444", textAlign: "center", padding: "30px 0", fontSize: 13, fontFamily: "monospace" }}>No projects yet</div>}
+                      {projects.length === 0 && <div style={{ color: "#444", textAlign: "center", padding: "30px 0", fontSize: 13, fontFamily: "monospace" }}>No projects yet</div>}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20 }}>
@@ -1732,6 +2371,22 @@ export function App() {
                           cursor: "pointer", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase"
                         }}>{f}</button>
                       ))}
+                      <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{
+                        background: "#111122",
+                        color: "#ccc",
+                        border: "1px solid #1a1a2e",
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        fontSize: 11,
+                        fontFamily: "monospace",
+                        minWidth: 140,
+                      }}>
+                        <option value="all">All Categories</option>
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
                       <button onClick={() => setShowNewProject(true)} style={{
                         background: "#00FFB2", border: "none", color: "#000", padding: "6px 14px", borderRadius: 8,
                         cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700
@@ -1740,7 +2395,13 @@ export function App() {
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
                     {filteredProjects.map(p => (
-                      <ProjectCard key={p.id} project={p} onClick={proj => setSelectedProject(proj)} onDelete={handleDeleteProject} />
+                      <ProjectCard
+                        key={p.id}
+                        project={p}
+                        onClick={proj => setSelectedProject(proj)}
+                        onDelete={handleDeleteProject}
+                        onExport={handleExportProject}
+                      />
                     ))}
                   </div>
                   {filteredProjects.length === 0 && (
@@ -1755,14 +2416,18 @@ export function App() {
               {view === "projects" && selectedProject && (
                 <ProjectDetail project={selectedProject} onClose={() => setSelectedProject(null)} saving={saving}
                   onSave={handleUpdateProject}
-                  onDeleteLearning={handleDeleteLearning}
-                  onDeleteReport={handleDeleteReport}
-                  onDeleteDoc={handleDeleteDoc}
-                  onDeleteGoal={handleDeleteGoal}
                   onCreateLearning={handleCreateLearning}
                   onCreateReport={handleCreateReport}
                   onCreateDoc={handleCreateDoc}
                   onCreateGoal={handleCreateGoal}
+                  onExportProject={handleExportProject}
+                  onFetchGitData={handleFetchGitData}
+                  onUpdateGoal={handleUpdateGoal}
+                  onDeleteLearning={handleDeleteLearning}
+                  onDeleteReport={handleDeleteReport}
+                  onDeleteDoc={handleDeleteDoc}
+                  onDeleteGoal={handleDeleteGoal}
+                  fetchingGit={fetchingGitProjectId === selectedProject.id}
                 />
               )}
 
@@ -1931,12 +2596,132 @@ export function App() {
       {showApiConfig && (
         <ApiConfigModal currentUrl={apiBaseUrl} onClose={() => setShowApiConfig(false)} onSave={(url) => {
           setApiBaseUrl(url);
+          try {
+            localStorage.setItem("pulseiq_api_base_url", url);
+          } catch {
+            // no-op for environments where storage is unavailable
+          }
           connectToApi(url);
         }} />
       )}
 
       {/* Toasts */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Emi Chat */}
+      {showEmiChat && (
+        <div style={{
+          position: "fixed",
+          right: 24,
+          bottom: 96,
+          width: "min(360px, calc(100vw - 24px))",
+          height: "min(520px, 72vh)",
+          background: "#0b0b17",
+          border: "1px solid #1a1a2e",
+          borderRadius: 14,
+          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.55)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          zIndex: 100000,
+        }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 12px",
+            borderBottom: "1px solid #1a1a2e",
+            background: "#090912",
+          }}>
+            <div style={{ fontSize: 12, color: "#e0e0e0", fontFamily: "monospace", fontWeight: 700 }}>emi</div>
+            <button onClick={() => setShowEmiChat(false)} style={{
+              background: "transparent",
+              border: "1px solid #1a1a2e",
+              color: "#777",
+              borderRadius: 6,
+              padding: "2px 8px",
+              cursor: "pointer",
+              fontSize: 11,
+              fontFamily: "monospace",
+            }}>close</button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            {emiMessages.map((m) => (
+              <div key={m.id} style={{
+                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "85%",
+                background: m.role === "user" ? "#00FFB2" : "#111122",
+                color: m.role === "user" ? "#000" : "#d6d6d6",
+                border: m.role === "user" ? "none" : "1px solid #1a1a2e",
+                borderRadius: 10,
+                padding: "8px 10px",
+                fontSize: 12,
+                lineHeight: 1.4,
+                fontFamily: "monospace",
+                whiteSpace: "pre-wrap",
+              }}>
+                {m.text}
+              </div>
+            ))}
+            <div ref={emiEndRef} />
+          </div>
+
+          <div style={{ borderTop: "1px solid #1a1a2e", padding: 10, display: "flex", gap: 8 }}>
+            <input
+              value={emiInput}
+              onChange={(e) => setEmiInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void sendEmiMessage();
+              }}
+              placeholder="Ask emi..."
+              style={{
+                flex: 1,
+                background: "#080810",
+                border: "1px solid #1a1a2e",
+                color: "#e0e0e0",
+                borderRadius: 8,
+                padding: "8px 10px",
+                fontSize: 12,
+                fontFamily: "monospace",
+                outline: "none",
+              }}
+            />
+            <button onClick={() => void sendEmiMessage()} disabled={emiSending} style={{
+              background: "#00FFB2",
+              color: "#000",
+              border: "none",
+              borderRadius: 8,
+              padding: "8px 12px",
+              cursor: emiSending ? "wait" : "pointer",
+              fontWeight: 700,
+              fontSize: 12,
+              fontFamily: "monospace",
+              opacity: emiSending ? 0.7 : 1,
+            }}>Send</button>
+          </div>
+        </div>
+      )}
+
+      <button onClick={() => setShowEmiChat((prev) => !prev)} style={{
+        position: "fixed",
+        right: 24,
+        bottom: 24,
+        zIndex: 100001,
+        width: 54,
+        height: 54,
+        borderRadius: "50%",
+        border: "1px solid #00FFB288",
+        background: "#00FFB2",
+        color: "#000",
+        cursor: "pointer",
+        fontFamily: "monospace",
+        fontWeight: 800,
+        fontSize: 12,
+        boxShadow: "0 12px 34px rgba(0, 255, 178, 0.45)",
+      }}>
+        emi
+      </button>
 
       {/* CSS Animations */}
       <style>{`

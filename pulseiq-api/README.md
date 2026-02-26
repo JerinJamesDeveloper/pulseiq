@@ -1,110 +1,54 @@
 # PulseIQ API
 
-PulseIQ REST API built with Node.js, Express, and MySQL. This API manages projects, learning materials, reports, documents, goals, and analytics for the PulseIQ platform.
+This repository contains a REST API for the PulseIQ application.  It uses Express and MySQL for data storage.
 
-## 🚀 Tech Stack
+## Setup
 
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Database:** MySQL (using `mysql2`)
-- **Security:** Helmet, CORS
-- **Validation:** Express Validator
-- **Logging:** Morgan
-- **Development:** Nodemon, Dotenv
+1. Copy `.env.example` to `.env` and supply your configuration values (especially `OPENROUTER_API_KEY` if you want to use the AI chat feature).
+2. Install dependencies: `npm install`.
+3. Start the server in development: `npm run dev`.
 
-## 🛠️ Getting Started
+## New AI Chat Endpoint
 
-### Prerequisites
+A new route has been added to interact with an OpenRouter-powered AI model.
 
-- Node.js (v16 or higher recommended)
-- MySQL Server
+- **Endpoint:** `POST /api/ai/chat`
+- **Request body:**
+  - Either a simple `prompt` string, *or* a `messages` array in the OpenAI chat format:
+    ```json
+    {
+      "prompt": "Hello there"
+    }
+    // or
+    {
+      "messages": [
+        {"role": "user", "content": "Tell me a joke"}
+      ]
+    }
+    ```
+  - Optional `model` to override the default (defaults to `gpt-4o-mini` or the value of `OPENROUTER_MODEL`).
+- **Response:** The raw JSON returned by OpenRouter (including `choices`, `usage`, etc.), wrapped under a `data` property.
 
-### Installation
+Validations are applied on input; if neither `prompt` nor `messages` are provided a `400` error is returned.
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd pulseiq-api
-   ```
+The request is handled in `src/controllers/aiController.js` with the API call abstracted in `src/services/aiService.js`.
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Git Metrics In Project Endpoints
 
-3. Configure environment variables:
-   Create a `.env` file in the root directory based on the following template:
-   ```env
-   # Server Configuration
-   PORT=3001
-   NODE_ENV=development
+Project API now supports reading/writing Git metrics as part of project payloads.
 
-   # Database Configuration
-   DB_HOST=localhost
-   DB_USER=root
-   DB_PASSWORD=your_password
-   DB_NAME=pulseiq
-   DB_PORT=3306
-   DB_CONNECTION_LIMIT=10
+- Doc: `docs/git-metrics.md`
 
-   # API Configuration
-   API_BASE_URL=http://localhost:3001/api
-   CORS_ORIGIN=http://localhost:5173
-   ```
+## Environment Variables
 
-4. Database Setup:
-   Import the database schema:
-   ```bash
-   npm run db:migrate
-   ```
+See `.env.example` for the full list.  At minimum, the AI feature requires:
 
-### Running the Project
-
-- **Development Mode:**
-  ```bash
-  npm run dev
-  ```
-
-- **Production Mode:**
-  ```bash
-  npm start
-  ```
-
-## 📚 API Endpoints Overview
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/api/health` | GET | Health check and server status |
-| `/api/projects` | GET/POST | Manage projects |
-| `/api/projects/:projectId/learning` | GET/POST | Manage learning materials for a project |
-| `/api/projects/:projectId/reports` | GET/POST | Manage project reports |
-| `/api/projects/:projectId/docs` | GET/POST | Manage project documentation |
-| `/api/projects/:projectId/goals` | GET/POST | Manage project goals |
-| `/api/analytics` | GET | Fetch platform analytics |
-
-## 📂 Project Structure
-
-```text
-pulseiq-api/
-├── src/
-│   ├── config/      # Database and application configuration
-│   ├── controllers/ # Request handlers
-│   ├── middleware/  # Custom Express middleware (error handling, auth, etc.)
-│   ├── models/      # Database models and queries
-│   ├── routes/      # API route definitions
-│   ├── services/    # Business logic and external integrations
-│   ├── utils/       # Utility functions and helpers
-│   ├── scripts/     # Database seeding and maintenance scripts
-│   └── app.js       # Express application setup
-├── server.js        # Server entry point
-└── .env             # Environment variables (private)
+```env
+OPENROUTER_API_KEY=your_api_key_here
+OPENROUTER_MODEL=gpt-4o-mini  # optional
 ```
 
-## 📜 Available Scripts
 
-- `npm run dev`: Starts the server with `nodemon` for development.
-- `npm start`: Starts the server in production mode.
-- `npm run db:migrate`: Migrates the database schema (requires `database_schema.sql`).
-- `npm run db:seed`: Seeds the database with initial data.
-- `npm run sync:process`: Processes the synchronization queue.
-- `npm run sync:clean`: Cleans old synchronization records.
+---
+
+Other routes and functionality remain unchanged from earlier versions.
