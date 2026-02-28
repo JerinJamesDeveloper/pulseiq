@@ -46,10 +46,42 @@ export interface DailyReportDTO {
 
 export interface GoalDTO {
   id: number;
+  projectId: number;
   title: string;
   target: number;
   current: number;
   category: string;
+  comments?: string;
+  status: "todo" | "in-progress" | "completed";
+  hoursSpent: number;
+  issueIds: number[];
+  reportIds: number[];
+  taskIds: number[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type IssueStatus = "open" | "in-progress" | "resolved" | "closed";
+export type IssuePriority = "low" | "medium" | "high" | "critical";
+
+export interface IssueDTO {
+  id: number;
+  projectId: number;
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  dateCreated: string;
+  updatedAt?: string;
+}
+
+export interface TaskDTO {
+  id: number;
+  projectId: number;
+  title: string;
+  status: "todo" | "in-progress" | "completed";
+  dateCreated: string;
+  updatedAt?: string;
 }
 
 export interface ProjectDTO {
@@ -77,6 +109,8 @@ export interface ProjectDTO {
   dailyReports: DailyReportDTO[];
   createdDate: string; // ISO date string
   goals: GoalDTO[];
+  issues: IssueDTO[];
+  tasks: TaskDTO[];
 }
 
 // ─── REQUEST PAYLOADS (Create / Update) ───────────────────────────────────────
@@ -167,8 +201,14 @@ export interface UpdateDocumentPayload {
 export interface CreateGoalPayload {
   title: string;
   target: number;
-  current: number;
+  current?: number;
   category: string;
+  comments?: string;
+  status?: "todo" | "in-progress" | "completed";
+  hoursSpent?: number;
+  issueIds?: number[];
+  reportIds?: number[];
+  taskIds?: number[];
 }
 
 export interface UpdateGoalPayload {
@@ -176,6 +216,36 @@ export interface UpdateGoalPayload {
   target?: number;
   current?: number;
   category?: string;
+  comments?: string;
+  status?: "todo" | "in-progress" | "completed";
+  hoursSpent?: number;
+  issueIds?: number[];
+  reportIds?: number[];
+  taskIds?: number[];
+}
+
+export interface CreateIssuePayload {
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+}
+
+export interface UpdateIssuePayload {
+  title?: string;
+  description?: string;
+  status?: IssueStatus;
+  priority?: IssuePriority;
+}
+
+export interface CreateTaskPayload {
+  title: string;
+  status?: "todo" | "in-progress" | "completed";
+}
+
+export interface UpdateTaskPayload {
+  title?: string;
+  status?: "todo" | "in-progress" | "completed";
 }
 
 // ─── API RESPONSE WRAPPERS ────────────────────────────────────────────────────

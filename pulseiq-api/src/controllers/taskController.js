@@ -1,0 +1,124 @@
+const Task = require('../models/Task');
+const Project = require('../models/Project');
+const { body, validationResult } = require('express-validator');
+
+const taskController = {
+    // Validation rules
+    validateTask: [
+        body('title').isLength({ min: 1, max: 200 }),
+        body('status').optional().isIn(['todo', 'in-progress', 'completed']),
+    ],
+
+    // GET /api/projects/:projectId/tasks
+    getProjectTasks: async (req, res, next) => {
+        try {
+            const project = await Project.findById(req.params.projectId);
+            if (!project) {
+                return res.status(404).json({
+                    error: 'Not Found',
+                    message: `Project with id ${req.params.projectId} not found`,
+                    statusCode: 404
+                });
+            }
+
+            const tasks = await Task.findByProjectId(req.params.projectId);
+            res.json({
+                data: tasks,
+                total: tasks.length,
+                message: 'Success',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    // POST /api/projects/:projectId/tasks
+    createTask: async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
+            const project = await Project.findById(req.params.projectId);
+            if (!project) {
+                return res.status(404).json({
+                    error: 'Not Found',
+                    message: `Project with id ${req.params.projectId} not found`,
+                    statusCode: 404
+                });
+            }
+
+            const taskId = await Task.create(req.params.projectId, req.body);
+            const newTask = await Task.findById(taskId);
+
+            res.status(201).json({
+                data: newTask,
+                message: 'Task created successfully',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    // PUT /api/projects/:projectId/tasks/:id
+    updateTask: async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    error: 'Validation Error',
+                    message: 'Invalid input data',
+                    statusCode: 400,
+                    details: errors.array()
+                });
+            }
+
+            const task = await Task.findById(req.params.id);
+            if (!task) {
+                return res.status(404).json({
+                    error: 'Not Found',
+                    message: `Task with id ${req.params.id} not found`,
+                    statusCode: 404
+                });
+            }
+
+            const updated = await Task.update(req.params.id, req.body);
+            const updatedTask = await Task.findById(req.params.id);
+
+            res.json({
+                data: updatedTask,
+                message: 'Task updated successfully',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            next(error);
+        }
+    },
+
+    // DELETE /api/projects/:projectId/tasks/:id
+    deleteTask: async (req, res, next) => {
+        try {
+            const deleted = await Task.delete(req.params.id);
+            if (!deleted) {
+                return res.status(404).json({
+                    error: 'Not Found',
+                    message: `Task with id ${req.params.id} not found`,
+                    statusCode: 404
+                });
+            }
+            res.status(204).send();
+        } catch (error) {
+            next(error);
+        }
+    }
+};
+
+module.exports = taskController;

@@ -208,6 +208,12 @@ CREATE TABLE goals (
     target DECIMAL(10,2) NOT NULL CHECK (target > 0),
     current DECIMAL(10,2) NOT NULL DEFAULT 0,
     category ENUM('Learning', 'Quality', 'Delivery', 'Performance', 'DevOps') NOT NULL,
+    comments TEXT,
+    status ENUM('todo', 'in-progress', 'completed') DEFAULT 'todo',
+    hoursSpent DECIMAL(10,2) DEFAULT 0,
+    issueIds JSON,
+    reportIds JSON,
+    taskIds JSON,
     createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
@@ -215,7 +221,37 @@ CREATE TABLE goals (
 );
 
 -- =====================================================
--- 14. SYNC STATUS TABLE (For offline sync tracking)
+-- 14. ISSUES TABLE
+-- =====================================================
+CREATE TABLE issues (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    projectId INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    status ENUM('open', 'in-progress', 'resolved', 'closed') DEFAULT 'open',
+    priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+    dateCreated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_project_status (projectId, status)
+);
+
+-- =====================================================
+-- 15. TASKS TABLE
+-- =====================================================
+CREATE TABLE tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    projectId INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    status ENUM('todo', 'in-progress', 'completed') DEFAULT 'todo',
+    dateCreated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_project_status (projectId, status)
+);
+
+-- =====================================================
+-- 16. SYNC STATUS TABLE (For offline sync tracking)
 -- =====================================================
 CREATE TABLE sync_queue (
     id INT AUTO_INCREMENT PRIMARY KEY,

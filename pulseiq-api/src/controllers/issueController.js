@@ -1,24 +1,10 @@
-const Goal = require('../models/Goal');
+const Issue = require('../models/Issue');
 const Project = require('../models/Project');
-const { body, validationResult } = require('express-validator');
+const { validationResult } = require('express-validator');
 
-const goalController = {
-    // Validation rules
-    validateGoal: [
-        body('title').isLength({ min: 1, max: 200 }),
-        body('target').isFloat({ min: 0.1 }),
-        body('current').optional().isFloat({ min: 0 }),
-        body('category').isIn(['Learning', 'Quality', 'Delivery', 'Performance', 'DevOps']),
-        body('comments').optional().isString(),
-        body('status').optional().isIn(['todo', 'in-progress', 'completed']),
-        body('hoursSpent').optional().isFloat({ min: 0 }),
-        body('issueIds').optional().isArray(),
-        body('reportIds').optional().isArray(),
-        body('taskIds').optional().isArray(),
-    ],
-
-    // GET /api/projects/:projectId/goals
-    getProjectGoals: async (req, res, next) => {
+const issueController = {
+    // GET /api/projects/:projectId/issues
+    getProjectIssues: async (req, res, next) => {
         try {
             const project = await Project.findById(req.params.projectId);
             if (!project) {
@@ -29,10 +15,10 @@ const goalController = {
                 });
             }
 
-            const goals = await Goal.findByProjectId(req.params.projectId);
+            const issues = await Issue.findByProjectId(req.params.projectId);
             res.json({
-                data: goals,
-                total: goals.length,
+                data: issues,
+                total: issues.length,
                 message: 'Success',
                 timestamp: new Date().toISOString()
             });
@@ -41,19 +27,20 @@ const goalController = {
         }
     },
 
-    // GET /api/projects/:projectId/goals/:id
-    getGoalById: async (req, res, next) => {
+    // GET /api/projects/:projectId/issues/:id
+    getIssueById: async (req, res, next) => {
         try {
-            const goal = await Goal.findById(req.params.id);
-            if (!goal) {
+            const issue = await Issue.findById(req.params.id);
+            if (!issue) {
                 return res.status(404).json({
                     error: 'Not Found',
-                    message: `Goal with id ${req.params.id} not found`,
+                    message: `Issue with id ${req.params.id} not found`,
                     statusCode: 404
                 });
             }
+
             res.json({
-                data: goal,
+                data: issue,
                 message: 'Success',
                 timestamp: new Date().toISOString()
             });
@@ -62,8 +49,8 @@ const goalController = {
         }
     },
 
-    // POST /api/projects/:projectId/goals
-    createGoal: async (req, res, next) => {
+    // POST /api/projects/:projectId/issues
+    createIssue: async (req, res, next) => {
         try {
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
@@ -84,12 +71,12 @@ const goalController = {
                 });
             }
 
-            const goalId = await Goal.create(req.params.projectId, req.body);
-            const newGoal = await Goal.findById(goalId);
+            const issueId = await Issue.create(req.params.projectId, req.body);
+            const newIssue = await Issue.findById(issueId);
 
             res.status(201).json({
-                data: newGoal,
-                message: 'Goal created successfully',
+                data: newIssue,
+                message: 'Issue created successfully',
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
@@ -97,8 +84,8 @@ const goalController = {
         }
     },
 
-    // PUT /api/projects/:projectId/goals/:id
-    updateGoal: async (req, res, next) => {
+    // PUT /api/projects/:projectId/issues/:id
+    updateIssue: async (req, res, next) => {
         try {
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
@@ -110,16 +97,16 @@ const goalController = {
                 });
             }
 
-            const goal = await Goal.findById(req.params.id);
-            if (!goal) {
+            const issue = await Issue.findById(req.params.id);
+            if (!issue) {
                 return res.status(404).json({
                     error: 'Not Found',
-                    message: `Goal with id ${req.params.id} not found`,
+                    message: `Issue with id ${req.params.id} not found`,
                     statusCode: 404
                 });
             }
 
-            const updated = await Goal.update(req.params.id, req.body);
+            const updated = await Issue.update(req.params.id, req.body);
             if (!updated) {
                 return res.status(400).json({
                     error: 'Validation Error',
@@ -127,11 +114,11 @@ const goalController = {
                     statusCode: 400
                 });
             }
-            const updatedGoal = await Goal.findById(req.params.id);
 
+            const updatedIssue = await Issue.findById(req.params.id);
             res.json({
-                data: updatedGoal,
-                message: 'Goal updated successfully',
+                data: updatedIssue,
+                message: 'Issue updated successfully',
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
@@ -139,17 +126,18 @@ const goalController = {
         }
     },
 
-    // DELETE /api/projects/:projectId/goals/:id
-    deleteGoal: async (req, res, next) => {
+    // DELETE /api/projects/:projectId/issues/:id
+    deleteIssue: async (req, res, next) => {
         try {
-            const deleted = await Goal.delete(req.params.id);
+            const deleted = await Issue.delete(req.params.id);
             if (!deleted) {
                 return res.status(404).json({
                     error: 'Not Found',
-                    message: `Goal with id ${req.params.id} not found`,
+                    message: `Issue with id ${req.params.id} not found`,
                     statusCode: 404
                 });
             }
+
             res.status(204).send();
         } catch (error) {
             next(error);
@@ -157,4 +145,4 @@ const goalController = {
     }
 };
 
-module.exports = goalController;
+module.exports = issueController;

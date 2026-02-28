@@ -264,9 +264,35 @@ CREATE TABLE goals (
 -- =====================================================
 -- 14. SYNC STATUS TABLE (For offline sync tracking)
 -- =====================================================
+CREATE TABLE issues (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    projectId INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    status ENUM('open', 'in-progress', 'resolved', 'closed') NOT NULL DEFAULT 'open',
+    priority ENUM('low', 'medium', 'high', 'critical') NOT NULL DEFAULT 'medium',
+    dateCreated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_project_status (projectId, status),
+    INDEX idx_project_created (projectId, dateCreated)
+);
+
+
+ALTER TABLE goals 
+ADD COLUMN comments TEXT,
+ADD COLUMN status ENUM('todo', 'in-progress', 'completed') DEFAULT 'todo',
+ADD COLUMN hoursSpent DECIMAL(10,2) DEFAULT 0,
+ADD COLUMN issueIds JSON,
+ADD COLUMN reportIds JSON,
+ADD COLUMN taskIds JSON;
+
+-- =====================================================
+-- 15. SYNC STATUS TABLE (For offline sync tracking)
+-- =====================================================
 CREATE TABLE sync_queue (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    entityType ENUM('project', 'learning', 'report', 'doc', 'goal') NOT NULL,
+    entityType ENUM('project', 'learning', 'report', 'doc', 'goal', 'issue') NOT NULL,
     entityId INT,
     operation ENUM('CREATE', 'UPDATE', 'DELETE') NOT NULL,
     payload JSON NOT NULL,
@@ -276,6 +302,33 @@ CREATE TABLE sync_queue (
     updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_status (status),
     INDEX idx_created (createdAt)
+);
+
+-- =====================================================
+-- 15. ISSUES TABLE
+-- =====================================================
+CREATE TABLE issues (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    projectId INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    status ENUM('open', 'in-progress', 'resolved', 'closed') DEFAULT 'open',
+    priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+    dateCreated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_project_status (projectId, status)
+);
+
+
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    projectId INT NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    status ENUM('todo', 'in-progress', 'completed') DEFAULT 'todo',
+    dateCreated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 -- =====================================================

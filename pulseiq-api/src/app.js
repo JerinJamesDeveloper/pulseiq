@@ -19,19 +19,18 @@ const learningRoutes = require('./routes/learningRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const docRoutes = require('./routes/docRoutes');
 const goalRoutes = require('./routes/goalRoutes');
+const issueRoutes = require('./routes/issueRoutes');
+const taskRoutes = require('./routes/taskRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 
 const app = express();
 
 // Test database connection
-testConnection();
+// testConnection(); // Commented out to avoid connection issues if not needed right now
 
 // Middleware
 app.use(helmet());
-// app.use(cors({
-//     origin: process.env.CORS_ORIGIN || 'http://localhost:5173'
-// }));
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
@@ -97,6 +96,8 @@ app.use('/api/projects/:projectId/learning', learningRoutes);
 app.use('/api/projects/:projectId/reports', reportRoutes);
 app.use('/api/projects/:projectId/docs', docRoutes);
 app.use('/api/projects/:projectId/goals', goalRoutes);
+app.use('/api/projects/:projectId/issues', issueRoutes);
+app.use('/api/projects/:projectId/tasks', taskRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/ai', aiRoutes);
 

@@ -9,6 +9,7 @@ import type {
   DailyReportDTO,
   DocumentationDTO,
   GoalDTO,
+  IssueDTO,
   CreateProjectPayload,
   UpdateProjectPayload,
   CreateLearningEntryPayload,
@@ -19,6 +20,11 @@ import type {
   UpdateDocumentPayload,
   CreateGoalPayload,
   UpdateGoalPayload,
+  CreateIssuePayload,
+  UpdateIssuePayload,
+  TaskDTO,
+  CreateTaskPayload,
+  UpdateTaskPayload,
   ApiResponse,
   ApiListResponse,
   AnalyticsOverviewDTO,
@@ -156,6 +162,46 @@ export const goalsApi = {
   /** DELETE /api/projects/:projectId/goals/:id */
   delete: (projectId: number, id: number) =>
     http.delete<void>(`/projects/${projectId}/goals/${id}`),
+};
+
+// ─── ISSUES ───────────────────────────────────────────────────────────────────
+
+export const issuesApi = {
+  /** GET /api/projects/:projectId/issues */
+  list: (projectId: number) =>
+    http.get<ApiListResponse<IssueDTO>>(`/projects/${projectId}/issues`),
+
+  /** POST /api/projects/:projectId/issues */
+  create: (projectId: number, payload: CreateIssuePayload) =>
+    http.post<ApiResponse<IssueDTO>>(`/projects/${projectId}/issues`, payload),
+
+  /** PUT /api/projects/:projectId/issues/:id */
+  update: (projectId: number, id: number, payload: UpdateIssuePayload) =>
+    http.put<ApiResponse<IssueDTO>>(`/projects/${projectId}/issues/${id}`, payload),
+
+  /** DELETE /api/projects/:projectId/issues/:id */
+  delete: (projectId: number, id: number) =>
+    http.delete<void>(`/projects/${projectId}/issues/${id}`),
+};
+
+// ─── TASKS ────────────────────────────────────────────────────────────────────
+
+export const tasksApi = {
+  /** GET /api/projects/:projectId/tasks */
+  list: (projectId: number) =>
+    http.get<ApiListResponse<TaskDTO>>(`/projects/${projectId}/tasks`),
+
+  /** POST /api/projects/:projectId/tasks */
+  create: (projectId: number, payload: CreateTaskPayload) =>
+    http.post<ApiResponse<TaskDTO>>(`/projects/${projectId}/tasks`, payload),
+
+  /** PUT /api/projects/:projectId/tasks/:id */
+  update: (projectId: number, id: number, payload: UpdateTaskPayload) =>
+    http.put<ApiResponse<TaskDTO>>(`/projects/${projectId}/tasks/${id}`, payload),
+
+  /** DELETE /api/projects/:projectId/tasks/:id */
+  delete: (projectId: number, id: number) =>
+    http.delete<void>(`/projects/${projectId}/tasks/${id}`),
 };
 
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────

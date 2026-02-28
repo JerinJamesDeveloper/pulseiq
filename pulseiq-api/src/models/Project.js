@@ -200,16 +200,36 @@ class Project {
         }));
 
         const [goals] = await pool.query(
-            'SELECT id, title, target, current, category FROM goals WHERE projectId = ? ORDER BY createdAt DESC',
+            'SELECT * FROM goals WHERE projectId = ? ORDER BY createdAt DESC',
             [project.id]
         );
-        project.goals = goals.map(goal => ({
-            id: goal.id,
-            title: goal.title,
-            target: goal.target,
-            current: goal.current,
-            category: goal.category
-        }));
+        project.goals = goals.map(this.normalizeGoal);
+
+        const [issues] = await pool.query(
+            'SELECT id, projectId, title, description, status, priority, dateCreated FROM issues WHERE projectId = ? ORDER BY dateCreated DESC',
+            [project.id]
+        );
+        project.issues = issues;
+
+        const [tasks] = await pool.query(
+            'SELECT * FROM tasks WHERE projectId = ? ORDER BY dateCreated DESC',
+            [project.id]
+        );
+        project.tasks = tasks;
+    }
+
+    static normalizeGoal(goal) {
+        if (!goal) return null;
+        try {
+            goal.issueIds = typeof goal.issueIds === 'string' ? JSON.parse(goal.issueIds) : (goal.issueIds || []);
+            goal.reportIds = typeof goal.reportIds === 'string' ? JSON.parse(goal.reportIds) : (goal.reportIds || []);
+            goal.taskIds = typeof goal.taskIds === 'string' ? JSON.parse(goal.taskIds) : (goal.taskIds || []);
+        } catch (e) {
+            goal.issueIds = [];
+            goal.reportIds = [];
+            goal.taskIds = [];
+        }
+        return goal;
     }
 
     static async upsertGitSnapshot(connection, projectId, gitMetrics = {}) {
@@ -291,7 +311,7 @@ ORDER BY p.createdDate DESC;
         return projects;
     }
     static async findById(id) {
-    const [projects] = await pool.query(`
+        const [projects] = await pool.query(`
         SELECT p.*, 
                CONCAT('[', GROUP_CONCAT(DISTINCT JSON_QUOTE(ts.technology)), ']') as techStack
         FROM projects p
@@ -382,7 +402,7 @@ ORDER BY p.createdDate DESC;
                                           thursday, friday, saturday, sunday)
                  VALUES (?, CURDATE(), 0, 0, 0, 0, 0, 0, 0)`,
                 [projectId]
-            ); 
+            );
 
             await this.upsertGitSnapshot(connection, projectId, projectData.gitMetrics || {});
 
@@ -543,7 +563,5 @@ ORDER BY p.createdDate DESC;
         }
     }
 }
-
-
 
 module.exports = Project;
