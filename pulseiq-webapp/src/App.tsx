@@ -76,6 +76,13 @@ export function App() {
       return "http://localhost:3001/api";
     }
   });
+  const [settingsApiUrl, setSettingsApiUrl] = useState(() => {
+    try {
+      return localStorage.getItem("pulseiq_api_base_url") || "http://localhost:3001/api";
+    } catch {
+      return "http://localhost:3001/api";
+    }
+  });
   const [showEmiChat, setShowEmiChat] = useState(false);
   const [emiInput, setEmiInput] = useState("");
   const [emiSending, setEmiSending] = useState(false);
@@ -164,6 +171,10 @@ export function App() {
       setEmiSending(false);
     }
   }, [emiInput, emiSending, emiMessages, buildEmiReply]);
+
+  useEffect(() => {
+    setSettingsApiUrl(apiBaseUrl);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     emiEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -526,6 +537,59 @@ export function App() {
     }
   }, [syncStatus, addToast]);
 
+  const handleUpdateDoc = useCallback(async (projectId: number, doc: DocumentationDTO) => {
+    setSaving(true);
+    const payload = {
+      title: doc.title,
+      content: doc.content,
+      status: doc.status,
+      date: doc.date,
+    };
+
+    const wordCount = doc.content.trim().split(/\s+/).length;
+    const sections = Math.max(1, doc.content.split("\n\n").filter((s) => s.trim()).length);
+    let updated: DocumentationDTO = { ...doc, wordCount, sections };
+    let apiSynced = syncStatus === "synced";
+
+    try {
+      if (syncStatus === "synced") {
+        const response = await docsApi.update(projectId, doc.id, payload);
+        updated = response.data;
+      }
+    } catch (err) {
+      apiSynced = false;
+      console.error("Update document error:", err);
+      addToast("Document updated locally (API sync failed)", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+    } finally {
+      const now = new Date();
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId
+            ? {
+              ...p,
+              documentation: p.documentation.map((d) => (d.id === doc.id ? updated : d)),
+              lastActive: now,
+            }
+            : p,
+        ),
+      );
+      setSelectedProject((prev) =>
+        prev && prev.id === projectId
+          ? {
+            ...prev,
+            documentation: prev.documentation.map((d) => (d.id === doc.id ? updated : d)),
+            lastActive: now,
+          }
+          : prev,
+      );
+      if (apiSynced || syncStatus !== "synced") {
+        addToast(apiSynced ? "Document updated (synced)" : "Document updated (offline)", "success");
+      }
+      setSaving(false);
+    }
+  }, [syncStatus, addToast]);
+
   const handleCreateGoal = useCallback(async (projectId: number, payload: CreateGoalPayload) => {
     setSaving(true);
     let created: GoalDTO = {
@@ -769,6 +833,19 @@ export function App() {
     addToast("Goal updated", "success");
   }, [syncStatus, addToast]);
 
+  const handleSaveApiSettings = useCallback(async () => {
+    const nextUrl = settingsApiUrl.trim();
+    if (!nextUrl) {
+      addToast("Please enter a valid API URL", "error");
+      return;
+    }
+
+    setApiBaseUrl(nextUrl);
+    localStorage.setItem("pulseiq_api_base_url", nextUrl);
+    await connectToApi(nextUrl);
+    addToast("API settings saved", "success");
+  }, [settingsApiUrl, connectToApi, addToast]);
+
   // ── Computed values ─────────────────────────────────────────────────────────
   const totalHours = projects?.reduce((a, p) => a + (p.totalHours || 0), 0) || 0;
   const totalCommits = projects?.reduce((a, p) => a + (p.commits || 0), 0) || 0;
@@ -826,6 +903,30 @@ export function App() {
           </nav>
           <div style={{ height: 24, width: 1, background: "#1a1a2e" }} />
           <SyncBadge status={syncStatus} onRetry={() => setShowApiConfig(true)} />
+          <button
+            onClick={() => {
+              setView("settings");
+              setSelectedProject(null);
+            }}
+            title="Open settings"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: "1px solid #1a1a2e",
+              background: view === "settings" ? "#111122" : "transparent",
+              color: view === "settings" ? "#38BDF8" : "#777",
+              cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s",
+            }}
+          >
+            ⚙
+          </button>
         </div>
       </header>
 
@@ -840,6 +941,7 @@ export function App() {
             onCreateLearning={handleCreateLearning}
             onCreateReport={handleCreateReport}
             onCreateDoc={handleCreateDoc}
+            onUpdateDoc={handleUpdateDoc}
             onCreateGoal={handleCreateGoal}
             onCreateIssue={handleCreateIssue}
             onExportProject={handleExportProject}
@@ -937,6 +1039,71 @@ export function App() {
             onUpdateProject={handleUpdateProject}
             addToast={addToast}
           />
+        ) : view === "settings" ? (
+          <div style={{ maxWidth: 720 }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: 24, color: "#fff", fontWeight: 800 }}>Settings</h2>
+            <p style={{ margin: "0 0 24px", color: "#666", fontFamily: "monospace", fontSize: 12 }}>
+              Configure app connectivity and environment options.
+            </p>
+
+            <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 16, padding: 24 }}>
+              <h3 style={{ margin: "0 0 16px", color: "#fff", fontSize: 15 }}>API Connection</h3>
+              <label style={{ display: "block", marginBottom: 8, fontSize: 12, color: "#888", fontFamily: "monospace" }}>
+                API Base URL
+              </label>
+              <input
+                value={settingsApiUrl}
+                onChange={(e) => setSettingsApiUrl(e.target.value)}
+                placeholder="http://localhost:3001/api"
+                style={{
+                  width: "100%",
+                  background: "#050510",
+                  color: "#fff",
+                  border: "1px solid #1a1a2e",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  fontSize: 13,
+                  marginBottom: 14,
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
+                <button
+                  onClick={handleSaveApiSettings}
+                  style={{
+                    background: "#00FFB2",
+                    color: "#000",
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "10px 16px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Save & Connect
+                </button>
+                <button
+                  onClick={() => setShowApiConfig(true)}
+                  style={{
+                    background: "transparent",
+                    color: "#38BDF8",
+                    border: "1px solid #1a1a2e",
+                    borderRadius: 10,
+                    padding: "10px 16px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Advanced Config
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "#777", fontFamily: "monospace" }}>
+                Current status: <span style={{ color: syncStatus === "synced" ? "#00FFB2" : syncStatus === "syncing" ? "#38BDF8" : "#FFD700" }}>{syncStatus.toUpperCase()}</span>
+              </div>
+            </div>
+          </div>
         ) : (
           <div style={{ textAlign: "center", padding: "100px 0", color: "#444" }}>
             <h2 style={{ fontSize: 24, marginBottom: 16 }}>{view.charAt(0).toUpperCase() + view.slice(1)} View</h2>

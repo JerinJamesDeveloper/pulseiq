@@ -4,6 +4,7 @@ import {
 } from "../../types";
 import {
     type GoalDTO,
+    type DocumentationDTO,
     type CreateLearningEntryPayload,
     type CreateDailyReportPayload,
     type CreateDocumentPayload,
@@ -30,6 +31,7 @@ import { GitMetricsView } from "../features/GitMetricsView";
 import { AddLearningModal } from "../modals/AddLearningModal";
 import { AddDailyReportModal } from "../modals/AddDailyReportModal";
 import { AddDocumentModal } from "../modals/AddDocumentModal";
+import { EditDocumentModal } from "../modals/EditDocumentModal";
 import { AddGoalModal } from "../modals/AddGoalModal";
 import { EditGoalModal } from "../modals/EditGoalModal";
 import { AddIssueModal } from "../modals/AddIssueModal";
@@ -43,6 +45,7 @@ export function ProjectDetail({
     onCreateLearning,
     onCreateReport,
     onCreateDoc,
+    onUpdateDoc,
     onCreateGoal,
     onExportProject,
     onFetchGitData,
@@ -66,6 +69,7 @@ export function ProjectDetail({
     onCreateLearning: (projectId: number, payload: CreateLearningEntryPayload) => void;
     onCreateReport: (projectId: number, payload: CreateDailyReportPayload) => void;
     onCreateDoc: (projectId: number, payload: CreateDocumentPayload) => void;
+    onUpdateDoc: (projectId: number, doc: DocumentationDTO) => void;
     onCreateGoal: (projectId: number, payload: CreateGoalPayload) => void;
     onCreateIssue: (projectId: number, payload: CreateIssuePayload) => void;
     onExportProject: (projectId: number) => Promise<boolean>;
@@ -96,6 +100,7 @@ export function ProjectDetail({
     const [showLearning, setShowLearning] = useState(false);
     const [showDailyReport, setShowDailyReport] = useState(false);
     const [showDocModal, setShowDocModal] = useState(false);
+    const [editingDoc, setEditingDoc] = useState<DocumentationDTO | null>(null);
     const [showGoalModal, setShowGoalModal] = useState(false);
     const [showIssueModal, setShowIssueModal] = useState(false);
     const [editingGoal, setEditingGoal] = useState<GoalDTO | null>(null);
@@ -704,6 +709,23 @@ export function ProjectDetail({
                                         <span style={{ fontSize: 10, color: "#555" }}>
                                             {expandedDoc === doc.id ? "▲" : "▼"}
                                         </span>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setEditingDoc(doc);
+                                            }}
+                                            style={{
+                                                background: "transparent",
+                                                border: "1px solid #38BDF844",
+                                                color: "#38BDF8",
+                                                padding: "1px 6px",
+                                                borderRadius: 3,
+                                                cursor: "pointer",
+                                                fontSize: 8,
+                                            }}
+                                        >
+                                            edit
+                                        </button>
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -1433,6 +1455,18 @@ export function ProjectDetail({
                     onSave={(payload) => {
                         onCreateDoc(project.id, payload);
                         setShowDocModal(false);
+                    }}
+                />
+            )}
+            {editingDoc && (
+                <EditDocumentModal
+                    project={project}
+                    doc={editingDoc}
+                    saving={saving}
+                    onClose={() => setEditingDoc(null)}
+                    onSave={(doc) => {
+                        onUpdateDoc(project.id, doc);
+                        setEditingDoc(null);
                     }}
                 />
             )}

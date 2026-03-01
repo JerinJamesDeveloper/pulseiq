@@ -17,7 +17,7 @@ export function AddGoalModal({
 }) {
     const [form, setForm] = useState({
         title: "",
-        target: 100,
+        target: Math.max(1, project.totalTasks || 100),
         current: 0,
         category: "Learning",
         comments: "",
@@ -70,6 +70,36 @@ export function AddGoalModal({
                             <option key={c}>{c}</option>
                         ))}
                     </select>
+                </div>
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 12,
+                        marginBottom: 14,
+                    }}
+                >
+                    <div>
+                        <label style={labelStyle}>Target Tasks</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={form.target}
+                            onChange={(e) => setForm({ ...form, target: Math.max(1, +e.target.value || 1) })}
+                            style={inputStyle}
+                        />
+                    </div>
+                    <div>
+                        <label style={labelStyle}>Current Progress</label>
+                        <input
+                            type="number"
+                            min={0}
+                            max={form.target}
+                            value={form.current}
+                            onChange={(e) => setForm({ ...form, current: Math.min(Math.max(0, +e.target.value || 0), form.target) })}
+                            style={inputStyle}
+                        />
+                    </div>
                 </div>
                 <div
                     style={{
@@ -164,8 +194,8 @@ export function AddGoalModal({
                             if (form.title.trim())
                                 onSave({
                                     title: form.title.trim(),
-                                    target: form.target,
-                                    current: form.current,
+                                    target: Math.max(1, form.target),
+                                    current: Math.min(Math.max(0, form.current), Math.max(1, form.target)),
                                     category: form.category,
                                     comments: form.comments,
                                     status: form.status,
