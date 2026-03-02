@@ -64,6 +64,7 @@ class GitHubService {
             const causeMessage = err?.cause?.message ? `: ${err.cause.message}` : '';
             const error = new Error(`GitHub API network request failed${causeCode}${causeMessage}`);
             error.statusCode = 502;
+            error.status = 502;
             throw error;
         }
 
@@ -71,6 +72,7 @@ class GitHubService {
             const text = await resp.text();
             const error = new Error(`GitHub API request failed (${resp.status}): ${text}`);
             error.statusCode = resp.status;
+            error.status = resp.status;
             throw error;
         }
 
@@ -83,6 +85,79 @@ class GitHubService {
     static async request(path, query = {}) {
         const { data } = await this.requestWithMeta(path, query);
         return data;
+    }
+
+    static async requestJson(method, path, body = undefined) {
+        const url = `${GITHUB_API_BASE}${path}`;
+        const headers = this.getHeaders();
+        if (body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+        }
+
+        let resp;
+        try {
+            resp = await fetch(url, {
+                method,
+                headers,
+                body: body !== undefined ? JSON.stringify(body) : undefined
+            });
+        } catch (err) {
+            const causeCode = err?.cause?.code ? ` (${err.cause.code})` : '';
+            const causeMessage = err?.cause?.message ? `: ${err.cause.message}` : '';
+            const error = new Error(`GitHub API network request failed${causeCode}${causeMessage}`);
+            error.statusCode = 502;
+            error.status = 502;
+            throw error;
+        }
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            const error = new Error(`GitHub API request failed (${resp.status}): ${text}`);
+            error.statusCode = resp.status;
+            error.status = resp.status;
+            throw error;
+        }
+
+        return resp.status === 204 ? null : await resp.json();
+    }
+
+    static buildIssueLabels(issueData = {}) {
+        const labels = ['source:pulseiq'];
+
+        if (issueData.priority) {
+            labels.push(`priority:${String(issueData.priority).toLowerCase()}`);
+        }
+
+        if (issueData.status) {
+            labels.push(`status:${String(issueData.status).toLowerCase()}`);
+        }
+
+        return labels;
+    }
+
+    static async createIssue(repoInput, issueData) {
+        if (!GITHUB_TOKEN) {
+            const error = new Error('GITHUB_TOKEN is not configured');
+            error.statusCode = 400;
+            error.status = 400;
+            throw error;
+        }
+
+        if (!issueData?.title || typeof issueData.title !== 'string' || issueData.title.trim() === '') {
+            const error = new Error('Issue title is required to create a GitHub issue');
+            error.statusCode = 400;
+            error.status = 400;
+            throw error;
+        }
+
+        const { owner, repo } = this.parseRepo(repoInput);
+        const payload = {
+            title: issueData.title.trim(),
+            body: issueData.description ? String(issueData.description) : '',
+            labels: this.buildIssueLabels(issueData)
+        };
+
+        return this.requestJson('POST', `/repos/${owner}/${repo}/issues`, payload);
     }
 
     static extractLastPage(linkHeader) {

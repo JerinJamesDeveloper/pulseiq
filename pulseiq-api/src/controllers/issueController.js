@@ -1,5 +1,6 @@
 const Issue = require('../models/Issue');
 const Project = require('../models/Project');
+const GitHubService = require('../services/githubService');
 const { validationResult } = require('express-validator');
 
 const issueController = {
@@ -71,12 +72,28 @@ const issueController = {
                 });
             }
 
+            if (!project.git_repo) {
+                return res.status(400).json({
+                    error: 'Configuration Error',
+                    message: 'Project git_repo is not configured. Configure repository URL before creating GitHub issues.',
+                    statusCode: 400
+                });
+            }
+
+            const githubIssue = await GitHubService.createIssue(project.git_repo, req.body);
             const issueId = await Issue.create(req.params.projectId, req.body);
             const newIssue = await Issue.findById(issueId);
 
             res.status(201).json({
-                data: newIssue,
-                message: 'Issue created successfully',
+                data: {
+                    ...newIssue,
+                    github: {
+                        id: githubIssue.id,
+                        number: githubIssue.number,
+                        url: githubIssue.html_url
+                    }
+                },
+                message: 'Issue created successfully in PulseIQ and GitHub',
                 timestamp: new Date().toISOString()
             });
         } catch (error) {

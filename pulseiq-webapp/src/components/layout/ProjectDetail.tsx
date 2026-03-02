@@ -36,6 +36,7 @@ import { AddGoalModal } from "../modals/AddGoalModal";
 import { EditGoalModal } from "../modals/EditGoalModal";
 import { AddIssueModal } from "../modals/AddIssueModal";
 import { EditIssueModal } from "../modals/EditIssueModal";
+import { AddTaskModal } from "../modals/AddTaskModal";
 import { inputStyle } from "../../constants";
 
 export function ProjectDetail({
@@ -103,6 +104,7 @@ export function ProjectDetail({
     const [editingDoc, setEditingDoc] = useState<DocumentationDTO | null>(null);
     const [showGoalModal, setShowGoalModal] = useState(false);
     const [showIssueModal, setShowIssueModal] = useState(false);
+    const [showTaskModal, setShowTaskModal] = useState(false);
     const [editingGoal, setEditingGoal] = useState<GoalDTO | null>(null);
     const [editingIssue, setEditingIssue] = useState<IssueDTO | null>(null);
     const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
@@ -152,6 +154,10 @@ export function ProjectDetail({
         high: "#FF6B35",
         critical: "#FF4444",
     };
+    const derivedTotalTasks = (project.tasks?.length || 0) + (project.issues?.length || 0);
+    const derivedCompletedTasks =
+        (project.tasks || []).filter((task) => task.status === "completed").length +
+        (project.issues || []).filter((issue) => issue.status === "resolved" || issue.status === "closed").length;
     const burnout = getBurnoutRisk(project);
     const weeklyActivity = getProjectWeeklyActivity(project);
 
@@ -438,6 +444,78 @@ export function ProjectDetail({
                         Open repository
                     </a>
                 )}
+            </div>
+
+            <div
+                style={{
+                    background: "#0d0d1a",
+                    border: "1px solid #1a1a2e",
+                    borderRadius: 12,
+                    padding: 20,
+                    marginBottom: 20,
+                }}
+            >
+                <div
+                    style={{
+                        fontSize: 11,
+                        color: "#555",
+                        fontFamily: "monospace",
+                        textTransform: "uppercase",
+                        letterSpacing: 1.5,
+                        marginBottom: 10,
+                    }}
+                >
+                    Task Updation
+                </div>
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 10,
+                        alignItems: "end",
+                    }}
+                >
+                    <div>
+                        <label style={{ fontSize: 10, color: "#666", marginBottom: 6, display: "block", fontFamily: "monospace" }}>
+                            Total (Tasks + Issues)
+                        </label>
+                        <div style={{ ...inputStyle, display: "flex", alignItems: "center", minHeight: 36 }}>
+                            {derivedTotalTasks}
+                        </div>
+                    </div>
+                    <div>
+                        <label style={{ fontSize: 10, color: "#666", marginBottom: 6, display: "block", fontFamily: "monospace" }}>
+                            Completed (Completed + Resolved/Closed)
+                        </label>
+                        <div style={{ ...inputStyle, display: "flex", alignItems: "center", minHeight: 36 }}>
+                            {derivedCompletedTasks}
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            onSave({
+                                ...project,
+                                totalTasks: derivedTotalTasks,
+                                completedTasks: derivedCompletedTasks,
+                            });
+                        }}
+                        disabled={saving}
+                        style={{
+                            background: saving ? "#555" : project.color,
+                            border: "none",
+                            color: "#000",
+                            padding: "8px 14px",
+                            borderRadius: 8,
+                            cursor: saving ? "wait" : "pointer",
+                            fontWeight: 700,
+                            fontFamily: "monospace",
+                            opacity: saving ? 0.6 : 1,
+                            height: 36,
+                        }}
+                    >
+                        Save Tasks
+                    </button>
+                </div>
             </div>
 
             <div
@@ -1170,10 +1248,7 @@ export function ProjectDetail({
                         ✅ Tasks ({project.tasks?.length || 0})
                     </div>
                     <button
-                        onClick={() => {
-                            const title = prompt("Enter task title:");
-                            if (title) onCreateTask(project.id, { title, status: 'todo' });
-                        }}
+                        onClick={() => setShowTaskModal(true)}
                         style={{
                             background: "transparent",
                             border: `1px solid ${project.color}44`,
@@ -1513,6 +1588,17 @@ export function ProjectDetail({
                     onSave={(i) => {
                         onUpdateIssue(project.id, i);
                         setEditingIssue(null);
+                    }}
+                />
+            )}
+            {showTaskModal && (
+                <AddTaskModal
+                    project={project}
+                    saving={saving}
+                    onClose={() => setShowTaskModal(false)}
+                    onSave={(payload) => {
+                        onCreateTask(project.id, { title: payload.title, status: payload.status || "todo" });
+                        setShowTaskModal(false);
                     }}
                 />
             )}

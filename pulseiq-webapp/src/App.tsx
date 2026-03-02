@@ -861,6 +861,17 @@ export function App() {
   const totalLearningEntries = projects?.reduce((a, p) => a + (p.learningEntries?.length || 0), 0) || 0;
   const totalDocs = projects?.reduce((a, p) => a + (p.documentation?.length || 0), 0) || 0;
   const totalDailyReports = projects?.reduce((a, p) => a + (p.dailyReports?.length || 0), 0) || 0;
+  const totalTaskCount = projects?.reduce((a, p) => a + (p.tasks?.length || 0), 0) || 0;
+  const completedTaskCount =
+    projects?.reduce((a, p) => a + ((p.tasks || []).filter((t) => t.status === "completed").length), 0) || 0;
+  const pendingTaskCount = Math.max(0, totalTaskCount - completedTaskCount);
+  const totalIssueCount = projects?.reduce((a, p) => a + (p.issues?.length || 0), 0) || 0;
+  const completedIssueCount =
+    projects?.reduce(
+      (a, p) => a + ((p.issues || []).filter((i) => i.status === "resolved" || i.status === "closed").length),
+      0,
+    ) || 0;
+  const pendingIssueCount = Math.max(0, totalIssueCount - completedIssueCount);
 
   const filteredByStatus = !projects ? [] : (
     filter === "all" ? projects :
@@ -975,6 +986,15 @@ export function App() {
               <StatCard label="Code Velocity" value={totalCommits} sub="total commits" accent="#38BDF8" />
               <StatCard label="Skill Growth" value={totalLearning} sub="learning points" accent="#A78BFA" />
               <StatCard label="Dev Pulse" value={`${overallProductivity}%`} sub="avg score" accent="#FF6B35" />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, marginBottom: 32 }}>
+              <StatCard label="Tasks Total" value={totalTaskCount} sub="across all projects" accent="#00FFB2" />
+              <StatCard label="Tasks Completed" value={completedTaskCount} sub="status: completed" accent="#38BDF8" />
+              <StatCard label="Tasks To Solve" value={pendingTaskCount} sub="remaining tasks" accent="#FFD700" />
+              <StatCard label="Issues Total" value={totalIssueCount} sub="across all projects" accent="#FF6B35" />
+              <StatCard label="Issues Completed" value={completedIssueCount} sub="resolved + closed" accent="#A78BFA" />
+              <StatCard label="Issues To Solve" value={pendingIssueCount} sub="open + in-progress" accent="#FF4444" />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
