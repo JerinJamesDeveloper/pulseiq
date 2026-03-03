@@ -284,6 +284,49 @@ export interface AnalyticsOverviewDTO {
   skillDistribution: Record<string, number>;
 }
 
+export interface DashboardStatsDTO {
+  totalProjects: number;
+  totalHours: number;
+  totalCommits: number;
+  totalLearningPoints: number;
+  totalLearningEntries: number;
+  totalDocs: number;
+  totalDailyReports: number;
+  totalTaskCount: number;
+  completedTaskCount: number;
+  pendingTaskCount?: number;
+  totalIssueCount: number;
+  completedIssueCount: number;
+  pendingIssueCount?: number;
+  openWorkload?: number;
+  totalWorkItems?: number;
+  totalCompletedItems?: number;
+  backlogCompletionRate?: number;
+  pendingProjectsCount?: number;
+  cleanProjectsCount?: number;
+  projectsWithPendingPercent?: number;
+  avgPendingAcrossActiveProjects?: number;
+  topBacklogProject?: DashboardProjectWorkloadDTO | null;
+  projectWorkload?: DashboardProjectWorkloadDTO[];
+  skillDistribution: Record<string, number>;
+  strongestSkill: string | null;
+}
+
+export interface DashboardProjectWorkloadDTO {
+  projectId: number;
+  name: string;
+  category: string;
+  totalTaskCount: number;
+  completedTaskCount: number;
+  pendingTaskCount: number;
+  totalIssueCount: number;
+  completedIssueCount: number;
+  pendingIssueCount: number;
+  totalPending: number;
+  completionRate: number;
+  riskLevel: "low" | "medium" | "high";
+}
+
 export type AIChatRole = "user" | "assistant" | "system";
 
 export interface AIChatMessageDTO {

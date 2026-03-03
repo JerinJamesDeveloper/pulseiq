@@ -2,6 +2,20 @@ const Project = require('../models/Project');
 const { validationResult } = require('express-validator');
 
 const projectController = {
+    // GET /api/projects/dashboard
+    getDashboardData: async (req, res, next) => {
+        try {
+            const dashboard = await Project.getDashboardData();
+            res.json({
+                data: dashboard,
+                message: 'Success',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            next(error);
+        }
+    },
+
     // GET /api/projects
     getAllProjects: async (req, res, next) => {
         try {

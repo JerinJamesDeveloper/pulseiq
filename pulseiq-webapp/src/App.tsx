@@ -24,7 +24,8 @@ import {
   type CreateGoalPayload,
   type CreateIssuePayload,
   type IssueDTO,
-  type TaskDTO
+  type TaskDTO,
+  type DashboardStatsDTO
 } from "./api";
 import { type Project, type SyncStatus, type Toast, type ChatMessage } from "./types";
 // No constants needed here after refactor
@@ -54,6 +55,8 @@ import { GoalsPage } from "./components/features/GoalsPage";
 import { AddProjectModal } from "./components/modals/AddProjectModal";
 import { ApiConfigModal } from "./components/modals/ApiConfigModal";
 
+const DASHBOARD_CACHE_KEY = "pulseiq_dashboard_stats_v1";
+
 // ── MAIN APP ─────────────────────────────────────────────────────────────────
 
 export function App() {
@@ -68,6 +71,16 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const [fetchingGitProjectId, setFetchingGitProjectId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStatsDTO | null>(() => {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as DashboardStatsDTO;
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [apiBaseUrl, setApiBaseUrl] = useState(() => {
     try {
@@ -103,6 +116,30 @@ export function App() {
   const dismissToast = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  const applyDashboardStats = useCallback((stats: DashboardStatsDTO | null) => {
+    setDashboardStats(stats);
+    try {
+      if (stats) localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(stats));
+      else localStorage.removeItem(DASHBOARD_CACHE_KEY);
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, []);
+
+  const refreshDashboardStats = useCallback(async (silent = true) => {
+    if (syncStatus !== "synced") return null;
+    try {
+      const response = await projectsApi.dashboard();
+      const stats = response?.data || null;
+      applyDashboardStats(stats);
+      return stats;
+    } catch (err) {
+      if (!silent) addToast("Failed to refresh dashboard metrics", "error");
+      if (err instanceof NetworkError) setSyncStatus("offline");
+      return null;
+    }
+  }, [syncStatus, applyDashboardStats, addToast]);
 
   const buildEmiReply = useCallback((input: string): string => {
     const text = input.toLowerCase();
@@ -193,18 +230,33 @@ export function App() {
         // Fetch projects from API
         setLoading(true);
         try {
-          const response = await projectsApi.list();
-          const raw = response as unknown as { data?: ProjectDTO[]; projects?: ProjectDTO[] } | ProjectDTO[];
-          const projectRows = Array.isArray(raw)
-            ? raw
-            : Array.isArray(raw.data)
-              ? raw.data
-              : Array.isArray(raw.projects)
-                ? raw.projects
-                : [];
-          const apiProjects = projectRows.map(dtoToProject);
-          setProjects(apiProjects);
-          addToast(`Loaded ${apiProjects.length} projects from API`, "info");
+          const [projectsResult, dashboardResult] = await Promise.allSettled([
+            projectsApi.list(),
+            projectsApi.dashboard(),
+          ]);
+
+          if (projectsResult.status === "fulfilled") {
+            const raw = projectsResult.value as unknown as { data?: ProjectDTO[]; projects?: ProjectDTO[] } | ProjectDTO[];
+            const projectRows = Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw.data)
+                ? raw.data
+                : Array.isArray(raw.projects)
+                  ? raw.projects
+                  : [];
+            const apiProjects = projectRows.map(dtoToProject);
+            setProjects(apiProjects);
+            addToast(`Loaded ${apiProjects.length} projects from API`, "info");
+          } else {
+            console.warn("Failed to fetch projects:", projectsResult.reason);
+            addToast("Using local data (projects API fetch failed)", "info");
+          }
+
+          if (dashboardResult.status === "fulfilled") {
+            applyDashboardStats(dashboardResult.value.data || null);
+          } else {
+            console.warn("Failed to fetch dashboard data:", dashboardResult.reason);
+          }
         } catch (err) {
           console.warn("Failed to fetch projects:", err);
           addToast("Using local data (API fetch failed)", "info");
@@ -219,7 +271,7 @@ export function App() {
       setSyncStatus("offline");
       addToast("Running in offline mode with local data", "info");
     }
-  }, [apiBaseUrl, addToast]);
+  }, [apiBaseUrl, addToast, applyDashboardStats]);
 
   const applyGitRefreshResponse = useCallback((projectId: number, payload: unknown): void => {
     let refreshed: Project | null = null;
@@ -295,6 +347,14 @@ export function App() {
     };
   }, [selectedProject?.id, syncStatus]);
 
+  useEffect(() => {
+    if (syncStatus !== "synced") return;
+    const timer = setInterval(() => {
+      refreshDashboardStats(true);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [syncStatus, refreshDashboardStats]);
+
   // ── CRUD Operations with API fallback ───────────────────────────────────────
 
   const handleCreateProject = useCallback(async (payload: CreateProjectPayload) => {
@@ -339,10 +399,13 @@ export function App() {
       addToast(`Project created locally (API error)`, "error");
       if (err instanceof NetworkError) setSyncStatus("offline");
     } finally {
+      if (syncStatus === "synced") {
+        refreshDashboardStats(true);
+      }
       setSaving(false);
       setShowNewProject(false);
     }
-  }, [syncStatus, addToast]);
+  }, [syncStatus, addToast, refreshDashboardStats]);
 
   const handleUpdateProject = useCallback(async (updated: Project) => {
     setSaving(true);
@@ -370,9 +433,12 @@ export function App() {
     } finally {
       setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
       setSelectedProject(updated);
+      if (syncStatus === "synced") {
+        refreshDashboardStats(true);
+      }
       setSaving(false);
     }
-  }, [syncStatus, addToast]);
+  }, [syncStatus, addToast, refreshDashboardStats]);
 
   const handleExportProject = useCallback(async (projectId: number): Promise<boolean> => {
     try {
@@ -648,9 +714,12 @@ export function App() {
       if (apiSynced || syncStatus !== "synced") {
         addToast(apiSynced ? "Issue added (synced)" : "Issue added (offline)", "success");
       }
+      if (apiSynced) {
+        refreshDashboardStats(true);
+      }
       setSaving(false);
     }
-  }, [syncStatus, addToast]);
+  }, [syncStatus, addToast, refreshDashboardStats]);
 
   const handleUpdateIssue = useCallback(async (projectId: number, issue: IssueDTO) => {
     setSaving(true);
@@ -685,9 +754,12 @@ export function App() {
       if (apiSynced || syncStatus !== "synced") {
         addToast(apiSynced ? "Issue updated (synced)" : "Issue updated (offline)", "success");
       }
+      if (apiSynced) {
+        refreshDashboardStats(true);
+      }
       setSaving(false);
     }
-  }, [syncStatus, addToast]);
+  }, [syncStatus, addToast, refreshDashboardStats]);
 
   const handleDeleteProject = useCallback(async (id: number) => {
     try {
@@ -704,8 +776,11 @@ export function App() {
     } finally {
       setProjects(prev => prev.filter(p => p.id !== id));
       if (selectedProject?.id === id) setSelectedProject(null);
+      if (syncStatus === "synced") {
+        refreshDashboardStats(true);
+      }
     }
-  }, [syncStatus, selectedProject, addToast]);
+  }, [syncStatus, selectedProject, addToast, refreshDashboardStats]);
 
   const handleDeleteLearning = useCallback(async (projectId: number, entryId: number) => {
     try {
@@ -760,7 +835,10 @@ export function App() {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, issues: (p.issues || []).filter(i => i.id !== issueId) } : p));
     setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, issues: (prev.issues || []).filter(i => i.id !== issueId) } : prev);
     addToast("Issue deleted", "info");
-  }, [syncStatus, addToast]);
+    if (syncStatus === "synced") {
+      refreshDashboardStats(true);
+    }
+  }, [syncStatus, addToast, refreshDashboardStats]);
 
   const handleCreateTask = useCallback(async (projectId: number, payload: { title: string; status: string }) => {
     setSaving(true);
@@ -774,9 +852,12 @@ export function App() {
     finally {
       setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: [...(p.tasks || []), created] } : p));
       setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, tasks: [...(prev.tasks || []), created] } : prev);
+      if (syncStatus === "synced") {
+        refreshDashboardStats(true);
+      }
       setSaving(false);
     }
-  }, [syncStatus]);
+  }, [syncStatus, refreshDashboardStats]);
 
   const handleUpdateTask = useCallback(async (projectId: number, task: TaskDTO) => {
     try {
@@ -786,7 +867,10 @@ export function App() {
     } catch (err) { console.error(err); if (err instanceof NetworkError) setSyncStatus("offline"); }
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: p.tasks.map(t => t.id === task.id ? task : t) } : p));
     setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, tasks: prev.tasks.map(t => t.id === task.id ? task : t) } : prev);
-  }, [syncStatus]);
+    if (syncStatus === "synced") {
+      refreshDashboardStats(true);
+    }
+  }, [syncStatus, refreshDashboardStats]);
 
   const handleDeleteTask = useCallback(async (projectId: number, taskId: number) => {
     try {
@@ -796,7 +880,10 @@ export function App() {
     } catch (err) { console.error(err); if (err instanceof NetworkError) setSyncStatus("offline"); }
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: p.tasks.filter(t => t.id !== taskId) } : p));
     setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
-  }, [syncStatus]);
+    if (syncStatus === "synced") {
+      refreshDashboardStats(true);
+    }
+  }, [syncStatus, refreshDashboardStats]);
 
   const handleUpdateGoal = useCallback(async (projectId: number, goal: GoalDTO) => {
     try {
@@ -850,28 +937,85 @@ export function App() {
   const totalHours = projects?.reduce((a, p) => a + (p.totalHours || 0), 0) || 0;
   const totalCommits = projects?.reduce((a, p) => a + (p.commits || 0), 0) || 0;
   const totalLearning = projects?.reduce((a, p) => a + (p.learningPoints || 0), 0) || 0;
+  const projectCount = dashboardStats?.totalProjects ?? (projects?.length || 0);
+  const dashboardTotalHours = dashboardStats?.totalHours ?? totalHours;
+  const dashboardTotalCommits = dashboardStats?.totalCommits ?? totalCommits;
+  const dashboardTotalLearning = dashboardStats?.totalLearningPoints ?? totalLearning;
   // const totalPRs = projects?.reduce((a, p) => a + (p.gitMetrics?.pullRequests || 0), 0) || 0;
   const overallProductivity = projects && projects.length > 0
     ? Math.round(projects.reduce((a, p) => a + calcProductivityScore(p), 0) / projects.length)
     : 0;
-  const skillDist = getSkillDistribution(projects || []);
+  const skillDist = dashboardStats?.skillDistribution || getSkillDistribution(projects || []);
   const sortedSkills = Object.entries(skillDist).sort((a, b) => b[1] - a[1]);
-  const strongestSkill = sortedSkills[0];
+  const strongestSkill = dashboardStats?.strongestSkill || sortedSkills[0]?.[0] || null;
   // const weakestSkill = sortedSkills[sortedSkills.length - 1];
-  const totalLearningEntries = projects?.reduce((a, p) => a + (p.learningEntries?.length || 0), 0) || 0;
-  const totalDocs = projects?.reduce((a, p) => a + (p.documentation?.length || 0), 0) || 0;
-  const totalDailyReports = projects?.reduce((a, p) => a + (p.dailyReports?.length || 0), 0) || 0;
-  const totalTaskCount = projects?.reduce((a, p) => a + (p.tasks?.length || 0), 0) || 0;
-  const completedTaskCount =
-    projects?.reduce((a, p) => a + ((p.tasks || []).filter((t) => t.status === "completed").length), 0) || 0;
+  const totalLearningEntries = dashboardStats?.totalLearningEntries
+    ?? (projects?.reduce((a, p) => a + (p.learningEntries?.length || 0), 0) || 0);
+  const totalDocs = dashboardStats?.totalDocs
+    ?? (projects?.reduce((a, p) => a + (p.documentation?.length || 0), 0) || 0);
+  const totalDailyReports = dashboardStats?.totalDailyReports
+    ?? (projects?.reduce((a, p) => a + (p.dailyReports?.length || 0), 0) || 0);
+  const totalTaskCount = dashboardStats?.totalTaskCount
+    ?? (projects?.reduce((a, p) => a + (p.tasks?.length || 0), 0) || 0);
+  const completedTaskCount = dashboardStats?.completedTaskCount
+    ?? (projects?.reduce((a, p) => a + ((p.tasks || []).filter((t) => t.status === "completed").length), 0) || 0);
   const pendingTaskCount = Math.max(0, totalTaskCount - completedTaskCount);
-  const totalIssueCount = projects?.reduce((a, p) => a + (p.issues?.length || 0), 0) || 0;
-  const completedIssueCount =
-    projects?.reduce(
+  const totalIssueCount = dashboardStats?.totalIssueCount
+    ?? (projects?.reduce((a, p) => a + (p.issues?.length || 0), 0) || 0);
+  const completedIssueCount = dashboardStats?.completedIssueCount
+    ?? (projects?.reduce(
       (a, p) => a + ((p.issues || []).filter((i) => i.status === "resolved" || i.status === "closed").length),
       0,
-    ) || 0;
+    ) || 0);
   const pendingIssueCount = Math.max(0, totalIssueCount - completedIssueCount);
+  const localProjectWorkload = (projects || [])
+    .map((project) => {
+      const taskCount = project.tasks?.length || 0;
+      const completedTasks = (project.tasks || []).filter((task) => task.status === "completed").length;
+      const pendingTasks = Math.max(0, taskCount - completedTasks);
+      const issueCount = project.issues?.length || 0;
+      const completedIssues = (project.issues || []).filter(
+        (issue) => issue.status === "resolved" || issue.status === "closed",
+      ).length;
+      const pendingIssues = Math.max(0, issueCount - completedIssues);
+      const totalItems = taskCount + issueCount;
+      const completedItems = completedTasks + completedIssues;
+
+      return {
+        projectId: project.id,
+        name: project.name,
+        category: project.category,
+        totalTaskCount: taskCount,
+        completedTaskCount: completedTasks,
+        pendingTaskCount: pendingTasks,
+        totalIssueCount: issueCount,
+        completedIssueCount: completedIssues,
+        pendingIssueCount: pendingIssues,
+        totalPending: pendingTasks + pendingIssues,
+        completionRate: totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0,
+        riskLevel: pendingTasks + pendingIssues >= 10 ? "high" : pendingTasks + pendingIssues >= 4 ? "medium" : "low",
+      };
+    })
+    .sort((a, b) => b.totalPending - a.totalPending);
+  const projectWorkload = dashboardStats?.projectWorkload && dashboardStats.projectWorkload.length > 0
+    ? dashboardStats.projectWorkload
+    : localProjectWorkload;
+  const pendingProjects = projectWorkload.filter((entry) => entry.totalPending > 0);
+  const cleanProjectsCount = Math.max(0, projectCount - pendingProjects.length);
+  const topBacklogProject = pendingProjects[0] || null;
+  const totalWorkItems = totalTaskCount + totalIssueCount;
+  const totalCompletedItems = completedTaskCount + completedIssueCount;
+  const backlogCompletionRate = totalWorkItems > 0
+    ? Math.round((totalCompletedItems / totalWorkItems) * 100)
+    : 0;
+  const projectsWithPendingPercent = projectCount > 0
+    ? Math.round((pendingProjects.length / projectCount) * 100)
+    : 0;
+  const avgPendingAcrossActiveProjects = dashboardStats?.avgPendingAcrossActiveProjects !== undefined
+    ? dashboardStats.avgPendingAcrossActiveProjects.toFixed(1)
+    : pendingProjects.length > 0
+      ? (pendingProjects.reduce((sum, item) => sum + item.totalPending, 0) / pendingProjects.length).toFixed(1)
+      : "0.0";
 
   const filteredByStatus = !projects ? [] : (
     filter === "all" ? projects :
@@ -982,45 +1126,115 @@ export function App() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20, marginBottom: 32 }}>
-              <StatCard label="Total Effort" value={`${totalHours}h`} sub={`${projects.length} projects`} accent="#00FFB2" />
-              <StatCard label="Code Velocity" value={totalCommits} sub="total commits" accent="#38BDF8" />
-              <StatCard label="Skill Growth" value={totalLearning} sub="learning points" accent="#A78BFA" />
+              <StatCard label="Total Effort" value={`${dashboardTotalHours}h`} sub={`${projectCount} projects`} accent="#00FFB2" />
+              <StatCard label="Code Velocity" value={dashboardTotalCommits} sub="total commits" accent="#38BDF8" />
+              <StatCard label="Skill Growth" value={dashboardTotalLearning} sub="learning points" accent="#A78BFA" />
               <StatCard label="Dev Pulse" value={`${overallProductivity}%`} sub="avg score" accent="#FF6B35" />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, marginBottom: 32 }}>
-              <StatCard label="Tasks Total" value={totalTaskCount} sub="across all projects" accent="#00FFB2" />
-              <StatCard label="Tasks Completed" value={completedTaskCount} sub="status: completed" accent="#38BDF8" />
-              <StatCard label="Tasks To Solve" value={pendingTaskCount} sub="remaining tasks" accent="#FFD700" />
-              <StatCard label="Issues Total" value={totalIssueCount} sub="across all projects" accent="#FF6B35" />
-              <StatCard label="Issues Completed" value={completedIssueCount} sub="resolved + closed" accent="#A78BFA" />
-              <StatCard label="Issues To Solve" value={pendingIssueCount} sub="open + in-progress" accent="#FF4444" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20, marginBottom: 32 }}>
+              <StatCard label="Open Workload" value={pendingTaskCount + pendingIssueCount} sub="pending tasks + issues" accent="#FFD700" />
+              <StatCard label="Projects With Pending" value={`${pendingProjects.length}/${projectCount}`} sub={`${projectsWithPendingPercent}% of portfolio`} accent="#FF6B35" />
+              <StatCard label="Backlog Completion" value={`${backlogCompletionRate}%`} sub={`${totalCompletedItems}/${totalWorkItems} items done`} accent="#38BDF8" />
+              <StatCard
+                label="Top Blocked Project"
+                value={topBacklogProject ? topBacklogProject.name : "None"}
+                sub={topBacklogProject ? `${topBacklogProject.totalPending} open items` : "No pending workload"}
+                accent="#FF4444"
+              />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-              <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 16, padding: 24 }}>
-                <h3 style={{ margin: "0 0 20px", fontSize: 16, color: "#e0e0e0", fontFamily: "monospace", textAlign: "center" }}>Skill Distribution</h3>
-                <SkillRadar projects={projects} />
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 1fr)", gap: 24 }}>
+              <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 16, padding: 20, overflow: "hidden" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <h3 style={{ margin: 0, fontSize: 16, color: "#e0e0e0", fontFamily: "monospace" }}>Pending Work By Project</h3>
+                  <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace" }}>{pendingProjects.length} projects need attention</span>
+                </div>
+
+                {pendingProjects.length === 0 ? (
+                  <div style={{ border: "1px dashed #1a1a2e", borderRadius: 12, padding: "28px 20px", textAlign: "center", color: "#555", fontSize: 13 }}>
+                    All tracked projects are clear. No pending tasks or issues.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {pendingProjects.slice(0, 8).map((entry) => {
+                      const linkedProject = projects.find((project) => project.id === entry.projectId) || null;
+                      const level = entry.riskLevel || (entry.totalPending >= 10 ? "high" : entry.totalPending >= 4 ? "medium" : "low");
+                      const levelColor = level === "high" ? "#FF4444" : level === "medium" ? "#FFD700" : "#00FFB2";
+                      return (
+                        <button
+                          key={entry.projectId}
+                          onClick={() => {
+                            if (linkedProject) setSelectedProject(linkedProject);
+                          }}
+                          style={{
+                            border: "1px solid #1a1a2e",
+                            borderRadius: 12,
+                            padding: "12px 14px",
+                            background: "#0d0d1a",
+                            display: "grid",
+                            gridTemplateColumns: "minmax(160px, 1.4fr) repeat(4, minmax(60px, 0.6fr))",
+                            gap: 10,
+                            alignItems: "center",
+                            color: "#d7d7d7",
+                            textAlign: "left",
+                            cursor: linkedProject ? "pointer" : "default",
+                            opacity: linkedProject ? 1 : 0.85,
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 2 }}>{entry.name}</div>
+                            <div style={{ fontSize: 10, color: "#666", textTransform: "uppercase", letterSpacing: 1 }}>{entry.category}</div>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>
+                            <div style={{ color: "#666", marginBottom: 2 }}>TASKS</div>
+                            <strong style={{ color: "#38BDF8" }}>{entry.pendingTaskCount}</strong>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>
+                            <div style={{ color: "#666", marginBottom: 2 }}>ISSUES</div>
+                            <strong style={{ color: "#A78BFA" }}>{entry.pendingIssueCount}</strong>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>
+                            <div style={{ color: "#666", marginBottom: 2 }}>TOTAL</div>
+                            <strong style={{ color: "#FFD700" }}>{entry.totalPending}</strong>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>
+                            <div style={{ color: "#666", marginBottom: 2 }}>RISK</div>
+                            <strong style={{ color: levelColor, textTransform: "uppercase" }}>{level}</strong>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
-              <div>
-                <h3 style={{ margin: "0 0 16px", fontSize: 16, color: "#e0e0e0", fontFamily: "monospace" }}>Recent Insights</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 16, padding: 20 }}>
-                  <h4 style={{ margin: "0 0 12px", fontSize: 12, color: "#555", fontFamily: "monospace", textTransform: "uppercase" }}>Key Metrics</h4>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    <div style={{ background: "#0d0d1a", padding: 12, borderRadius: 10, border: "1px solid #1a1a2e" }}>
-                      <div style={{ fontSize: 10, color: "#444", marginBottom: 4 }}>STRONGEST SKILL</div>
-                      <div style={{ fontSize: 14, color: "#00FFB2", fontWeight: 700 }}>{strongestSkill?.[0] || "None"}</div>
+                  <h3 style={{ margin: "0 0 14px", fontSize: 14, color: "#e0e0e0", fontFamily: "monospace" }}>Workload Signals</h3>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 10, color: "#666", marginBottom: 2 }}>AVERAGE OPEN ITEMS / ACTIVE PROJECT</div>
+                      <div style={{ color: "#FFD700", fontWeight: 700, fontSize: 15 }}>{avgPendingAcrossActiveProjects}</div>
                     </div>
-                    <div style={{ background: "#0d0d1a", padding: 12, borderRadius: 10, border: "1px solid #1a1a2e" }}>
-                      <div style={{ fontSize: 10, color: "#444", marginBottom: 4 }}>TOTAL ENTRIES</div>
-                      <div style={{ fontSize: 14, color: "#38BDF8", fontWeight: 700 }}>{totalLearningEntries} Logs</div>
+                    <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 10, color: "#666", marginBottom: 2 }}>PROJECTS CLEAR OF BACKLOG</div>
+                      <div style={{ color: "#00FFB2", fontWeight: 700, fontSize: 15 }}>{cleanProjectsCount}</div>
                     </div>
-                    <div style={{ background: "#0d0d1a", padding: 12, borderRadius: 10, border: "1px solid #1a1a2e" }}>
-                      <div style={{ fontSize: 10, color: "#444", marginBottom: 4 }}>DOCUMENTATION</div>
-                      <div style={{ fontSize: 14, color: "#A78BFA", fontWeight: 700 }}>{totalDocs} Files</div>
+                    <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 10, color: "#666", marginBottom: 2 }}>KNOWLEDGE & DOCUMENTATION</div>
+                      <div style={{ color: "#A78BFA", fontWeight: 700, fontSize: 15 }}>{totalLearningEntries} logs, {totalDocs} docs</div>
+                    </div>
+                    <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 10, color: "#666", marginBottom: 2 }}>STRONGEST SKILL</div>
+                      <div style={{ color: "#38BDF8", fontWeight: 700, fontSize: 15 }}>{strongestSkill || "None"}</div>
                     </div>
                   </div>
+                </div>
+
+                <div style={{ background: "#080810", border: "1px solid #111122", borderRadius: 16, padding: 20 }}>
+                  <h3 style={{ margin: "0 0 12px", fontSize: 14, color: "#e0e0e0", fontFamily: "monospace", textAlign: "center" }}>Skill Distribution</h3>
+                  <SkillRadar projects={projects} distribution={dashboardStats?.skillDistribution} />
                 </div>
               </div>
             </div>

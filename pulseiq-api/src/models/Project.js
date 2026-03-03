@@ -310,6 +310,176 @@ ORDER BY p.createdDate DESC;
 
         return projects;
     }
+
+    static normalizeSkillCategory(category) {
+        if (typeof category !== 'string') return null;
+        const key = category.trim().toLowerCase().replace(/[\s_-]+/g, '');
+        const map = {
+            backend: 'Backend',
+            frontend: 'Frontend',
+            devops: 'DevOps',
+            architecture: 'Architecture',
+            business: 'Business'
+        };
+        return map[key] || null;
+    }
+
+    static async getDashboardData() {
+        const [summaryRows] = await pool.query(`
+            SELECT
+                (SELECT COUNT(*) FROM projects) AS totalProjects,
+                (SELECT COALESCE(SUM(totalHours), 0) FROM projects) AS totalHours,
+                (SELECT COALESCE(SUM(commits), 0) FROM projects) AS totalCommits,
+                (SELECT COALESCE(SUM(learningPoints), 0) FROM projects) AS totalLearningPoints,
+                (SELECT COUNT(*) FROM learning_entries) AS totalLearningEntries,
+                (SELECT COUNT(*) FROM documentation) AS totalDocs,
+                (SELECT COUNT(*) FROM daily_reports) AS totalDailyReports,
+                (SELECT COUNT(*) FROM tasks) AS totalTaskCount,
+                (SELECT COUNT(*) FROM tasks WHERE status = 'completed') AS completedTaskCount,
+                (SELECT COUNT(*) FROM issues) AS totalIssueCount,
+                (SELECT COUNT(*) FROM issues WHERE status IN ('resolved', 'closed')) AS completedIssueCount
+        `);
+
+        const [projectWorkloadRows] = await pool.query(`
+            SELECT
+                p.id AS projectId,
+                p.name,
+                p.category,
+                COALESCE(t.totalTaskCount, 0) AS totalTaskCount,
+                COALESCE(t.completedTaskCount, 0) AS completedTaskCount,
+                COALESCE(i.totalIssueCount, 0) AS totalIssueCount,
+                COALESCE(i.completedIssueCount, 0) AS completedIssueCount
+            FROM projects p
+            LEFT JOIN (
+                SELECT
+                    projectId,
+                    COUNT(*) AS totalTaskCount,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completedTaskCount
+                FROM tasks
+                GROUP BY projectId
+            ) t ON t.projectId = p.id
+            LEFT JOIN (
+                SELECT
+                    projectId,
+                    COUNT(*) AS totalIssueCount,
+                    SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS completedIssueCount
+                FROM issues
+                GROUP BY projectId
+            ) i ON i.projectId = p.id
+            ORDER BY p.name ASC
+        `);
+
+        const [skillRows] = await pool.query(`
+            SELECT category, COALESCE(SUM(difficulty), 0) AS totalDifficulty
+            FROM learning_entries
+            GROUP BY category
+        `);
+
+        const skillDistribution = {
+            Backend: 0,
+            Frontend: 0,
+            DevOps: 0,
+            Architecture: 0,
+            Business: 0
+        };
+
+        for (const row of skillRows) {
+            const normalized = this.normalizeSkillCategory(row.category);
+            if (normalized && Object.prototype.hasOwnProperty.call(skillDistribution, normalized)) {
+                skillDistribution[normalized] += this.toNonNegativeNumber(row.totalDifficulty) * 10;
+            }
+        }
+
+        const strongestSkillEntry = Object.entries(skillDistribution).sort((a, b) => b[1] - a[1])[0];
+        const strongestSkill = strongestSkillEntry && strongestSkillEntry[1] > 0 ? strongestSkillEntry[0] : null;
+
+        const summary = summaryRows[0] || {};
+        const totalProjects = this.toNonNegativeNumber(summary.totalProjects);
+        const totalTaskCount = this.toNonNegativeNumber(summary.totalTaskCount);
+        const completedTaskCount = this.toNonNegativeNumber(summary.completedTaskCount);
+        const totalIssueCount = this.toNonNegativeNumber(summary.totalIssueCount);
+        const completedIssueCount = this.toNonNegativeNumber(summary.completedIssueCount);
+        const pendingTaskCount = Math.max(0, totalTaskCount - completedTaskCount);
+        const pendingIssueCount = Math.max(0, totalIssueCount - completedIssueCount);
+        const openWorkload = pendingTaskCount + pendingIssueCount;
+        const totalWorkItems = totalTaskCount + totalIssueCount;
+        const totalCompletedItems = completedTaskCount + completedIssueCount;
+        const backlogCompletionRate = totalWorkItems > 0
+            ? Math.round((totalCompletedItems / totalWorkItems) * 100)
+            : 0;
+
+        const projectWorkload = projectWorkloadRows.map((row) => {
+            const rowTotalTasks = this.toNonNegativeNumber(row.totalTaskCount);
+            const rowCompletedTasks = this.toNonNegativeNumber(row.completedTaskCount);
+            const rowPendingTasks = Math.max(0, rowTotalTasks - rowCompletedTasks);
+            const rowTotalIssues = this.toNonNegativeNumber(row.totalIssueCount);
+            const rowCompletedIssues = this.toNonNegativeNumber(row.completedIssueCount);
+            const rowPendingIssues = Math.max(0, rowTotalIssues - rowCompletedIssues);
+            const rowTotalItems = rowTotalTasks + rowTotalIssues;
+            const rowTotalPending = rowPendingTasks + rowPendingIssues;
+
+            let riskLevel = 'low';
+            if (rowTotalPending >= 10) riskLevel = 'high';
+            else if (rowTotalPending >= 4) riskLevel = 'medium';
+
+            return {
+                projectId: Number(row.projectId),
+                name: row.name,
+                category: row.category,
+                totalTaskCount: rowTotalTasks,
+                completedTaskCount: rowCompletedTasks,
+                pendingTaskCount: rowPendingTasks,
+                totalIssueCount: rowTotalIssues,
+                completedIssueCount: rowCompletedIssues,
+                pendingIssueCount: rowPendingIssues,
+                totalPending: rowTotalPending,
+                completionRate: rowTotalItems > 0
+                    ? Math.round(((rowCompletedTasks + rowCompletedIssues) / rowTotalItems) * 100)
+                    : 0,
+                riskLevel
+            };
+        }).sort((a, b) => b.totalPending - a.totalPending);
+
+        const pendingProjects = projectWorkload.filter((entry) => entry.totalPending > 0);
+        const pendingProjectsCount = pendingProjects.length;
+        const cleanProjectsCount = Math.max(0, totalProjects - pendingProjectsCount);
+        const projectsWithPendingPercent = totalProjects > 0
+            ? Math.round((pendingProjectsCount / totalProjects) * 100)
+            : 0;
+        const avgPendingAcrossActiveProjects = pendingProjectsCount > 0
+            ? Number((pendingProjects.reduce((sum, item) => sum + item.totalPending, 0) / pendingProjectsCount).toFixed(1))
+            : 0;
+        const topBacklogProject = pendingProjects[0] || null;
+
+        return {
+            totalProjects,
+            totalHours: this.toNonNegativeNumber(summary.totalHours),
+            totalCommits: this.toNonNegativeNumber(summary.totalCommits),
+            totalLearningPoints: this.toNonNegativeNumber(summary.totalLearningPoints),
+            totalLearningEntries: this.toNonNegativeNumber(summary.totalLearningEntries),
+            totalDocs: this.toNonNegativeNumber(summary.totalDocs),
+            totalDailyReports: this.toNonNegativeNumber(summary.totalDailyReports),
+            totalTaskCount,
+            completedTaskCount,
+            pendingTaskCount,
+            totalIssueCount,
+            completedIssueCount,
+            pendingIssueCount,
+            openWorkload,
+            totalWorkItems,
+            totalCompletedItems,
+            backlogCompletionRate,
+            pendingProjectsCount,
+            cleanProjectsCount,
+            projectsWithPendingPercent,
+            avgPendingAcrossActiveProjects,
+            topBacklogProject,
+            projectWorkload,
+            skillDistribution,
+            strongestSkill
+        };
+    }
+
     static async findById(id) {
         const [projects] = await pool.query(`
         SELECT p.*, 

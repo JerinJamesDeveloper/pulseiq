@@ -15,6 +15,7 @@ const projectValidation = [
 
 // Routes
 router.get('/', projectController.getAllProjects);
+router.get('/dashboard', projectController.getDashboardData);
 router.get('/:id/git-metrics', projectController.getProjectGitMetrics);
 router.get('/:id', projectController.getProjectById);
 router.post('/', projectValidation, projectController.createProject);

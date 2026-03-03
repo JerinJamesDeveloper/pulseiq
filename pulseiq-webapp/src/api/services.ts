@@ -28,6 +28,7 @@ import type {
   ApiResponse,
   ApiListResponse,
   AnalyticsOverviewDTO,
+  DashboardStatsDTO,
   AIChatRequestPayload,
   AIChatResponseDTO,
 } from "./types";
@@ -38,6 +39,10 @@ export const projectsApi = {
   /** GET /api/projects */
   list: () =>
     http.get<ApiListResponse<ProjectDTO>>("/projects"),
+
+  /** GET /api/projects/dashboard */
+  dashboard: () =>
+    http.get<ApiResponse<DashboardStatsDTO>>("/projects/dashboard"),
 
   /** GET /api/projects/:id */
   get: (id: number) =>

@@ -2,8 +2,8 @@
 import { type Project } from "../../types";
 import { getSkillDistribution } from "../../utils/analytics";
 
-export function SkillRadar({ projects }: { projects: Project[] }) {
-    const dist = getSkillDistribution(projects);
+export function SkillRadar({ projects, distribution }: { projects: Project[]; distribution?: Record<string, number> }) {
+    const dist = distribution && Object.keys(distribution).length > 0 ? distribution : getSkillDistribution(projects);
     const maxVal = Math.max(...Object.values(dist), 1);
     const cx = 90,
         cy = 90,
