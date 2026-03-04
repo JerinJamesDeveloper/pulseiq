@@ -93,12 +93,60 @@ class Project {
         }
 
         const [weekly] = await pool.query(
-            'SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, weekStartDate FROM weekly_hours WHERE projectId = ? ORDER BY weekStartDate DESC LIMIT 1',
+            `SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, weekStartDate
+   FROM weekly_hours
+   WHERE projectId = ?
+   AND weekStartDate <= CURDATE()
+   ORDER BY weekStartDate DESC
+   LIMIT 1`,
             [project.id]
         );
-        project.weeklyHours = weekly.length ?
-            [weekly[0].monday, weekly[0].tuesday, weekly[0].wednesday, weekly[0].thursday, weekly[0].friday, weekly[0].saturday, weekly[0].sunday] :
-            [0, 0, 0, 0, 0, 0, 0];
+
+        // Prefer computed latest-week totals from daily_reports when reports exist.
+        const [computedWeekly] = await pool.query(
+            `SELECT
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 0 THEN dr.hoursWorked ELSE 0 END), 0) AS monday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 1 THEN dr.hoursWorked ELSE 0 END), 0) AS tuesday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 2 THEN dr.hoursWorked ELSE 0 END), 0) AS wednesday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 3 THEN dr.hoursWorked ELSE 0 END), 0) AS thursday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 4 THEN dr.hoursWorked ELSE 0 END), 0) AS friday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 5 THEN dr.hoursWorked ELSE 0 END), 0) AS saturday,
+                COALESCE(SUM(CASE WHEN WEEKDAY(dr.date) = 6 THEN dr.hoursWorked ELSE 0 END), 0) AS sunday,
+                COUNT(*) AS reportCount
+             FROM daily_reports dr
+             WHERE dr.projectId = ?
+               AND DATE_SUB(dr.date, INTERVAL WEEKDAY(dr.date) DAY) = (
+                   SELECT DATE_SUB(MAX(date), INTERVAL WEEKDAY(MAX(date)) DAY)
+                   FROM daily_reports
+                   WHERE projectId = ?
+               )`,
+            [project.id, project.id]
+        );
+
+        const hasReportsForComputedWeek = computedWeekly.length && Number(computedWeekly[0].reportCount) > 0;
+        if (hasReportsForComputedWeek) {
+            project.weeklyHours = [
+                computedWeekly[0].monday,
+                computedWeekly[0].tuesday,
+                computedWeekly[0].wednesday,
+                computedWeekly[0].thursday,
+                computedWeekly[0].friday,
+                computedWeekly[0].saturday,
+                computedWeekly[0].sunday
+            ];
+        } else if (weekly.length) {
+            project.weeklyHours = [
+                weekly[0].monday,
+                weekly[0].tuesday,
+                weekly[0].wednesday,
+                weekly[0].thursday,
+                weekly[0].friday,
+                weekly[0].saturday,
+                weekly[0].sunday
+            ];
+        } else {
+            project.weeklyHours = [0, 0, 0, 0, 0, 0, 0];
+        }
 
         const [monthly] = await pool.query(
             'SELECT hours FROM daily_hours WHERE projectId = ? ORDER BY date DESC LIMIT 15',

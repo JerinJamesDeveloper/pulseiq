@@ -102,12 +102,8 @@ export function calcGitMetrics(p: Project) {
 }
 
 export function getProjectWeeklyActivity(project: Project): { labels: string[]; data: number[] } {
-    const normalizedWeekly =
-        project.weeklyHours && project.weeklyHours.length === 7
-            ? project.weeklyHours.map((n) => toFiniteNumber(n, 0))
-            : [0, 0, 0, 0, 0, 0, 0];
-    const hasWeeklyFromApi = normalizedWeekly.some((n) => n > 0);
-    if (hasWeeklyFromApi) {
+    if (project.weeklyHours && project.weeklyHours.length === 7) {
+        const normalizedWeekly = project.weeklyHours.map((n) => toFiniteNumber(n, 0));
         return { labels: WEEKLY_LABELS, data: normalizedWeekly };
     }
 
@@ -129,6 +125,6 @@ export function getProjectWeeklyActivity(project: Project): { labels: string[]; 
 
     return {
         labels: WEEKLY_LABELS,
-        data: normalizedWeekly,
+        data: [0, 0, 0, 0, 0, 0, 0],
     };
 }
