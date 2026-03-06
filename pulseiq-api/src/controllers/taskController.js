@@ -2,12 +2,41 @@ const Task = require('../models/Task');
 const Project = require('../models/Project');
 const { body, validationResult } = require('express-validator');
 
+const taskValidationRules = [
+    body('title').optional().isLength({ min: 1, max: 200 }),
+    body('description').optional({ nullable: true }).isString().isLength({ max: 5000 }),
+    body('type').optional({ nullable: true }).isIn(['feature', 'bug', 'improvement', 'research']),
+    body('status').optional().isIn(['todo', 'in-progress', 'completed']),
+    body('priority').optional({ nullable: true }).isIn(['low', 'medium', 'high', 'critical']),
+    body('storyPoints').optional({ nullable: true }).isInt({ min: 0 }),
+    body('complexityScore').optional({ nullable: true }).isInt({ min: 0 }),
+    body('createdBy').optional({ nullable: true }).isInt({ min: 0 }),
+    body('assignedTo').optional({ nullable: true }).isInt({ min: 0 }),
+    body('reviewerId').optional({ nullable: true }).isInt({ min: 0 }),
+    body('sprintId').optional({ nullable: true }).isInt({ min: 0 }),
+    body('milestoneId').optional({ nullable: true }).isInt({ min: 0 }),
+    body('estimatedHours').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('actualHours').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('commitCount').optional({ nullable: true }).isInt({ min: 0 }),
+    body('linesAdded').optional({ nullable: true }).isInt({ min: 0 }),
+    body('linesRemoved').optional({ nullable: true }).isInt({ min: 0 }),
+    body('filesChanged').optional({ nullable: true }).isInt({ min: 0 }),
+    body('branchName').optional({ nullable: true }).isString().isLength({ max: 255 }),
+    body('pullRequestId').optional({ nullable: true }).isString().isLength({ max: 255 }),
+    body('riskLevel').optional({ nullable: true }).isIn(['low', 'medium', 'high']),
+    body('impactLevel').optional({ nullable: true }).isIn(['low', 'medium', 'high']),
+    body('startDate').optional({ nullable: true }).isISO8601(),
+    body('dueDate').optional({ nullable: true }).isISO8601(),
+    body('completedAt').optional({ nullable: true }).isISO8601(),
+];
+
 const taskController = {
-    // Validation rules
-    validateTask: [
-        body('title').isLength({ min: 1, max: 200 }),
-        body('status').optional().isIn(['todo', 'in-progress', 'completed']),
+    validateCreateTask: [
+        body('title').exists().isLength({ min: 1, max: 200 }),
+        ...taskValidationRules,
     ],
+
+    validateUpdateTask: taskValidationRules,
 
     // GET /api/projects/:projectId/tasks
     getProjectTasks: async (req, res, next) => {
@@ -90,7 +119,7 @@ const taskController = {
                 });
             }
 
-            const updated = await Task.update(req.params.id, req.body);
+            await Task.update(req.params.id, req.body);
             const updatedTask = await Task.findById(req.params.id);
 
             res.json({

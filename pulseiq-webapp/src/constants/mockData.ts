@@ -34,6 +34,7 @@ export const DEFAULT_PROJECTS: Project[] = [
             { id: 2, title: "Reduce bug count", target: 5, current: 8, category: "Quality" },
         ],
         issues: [],
+        tasks: [],
     },
     {
         id: 2, name: "DevPulse", category: "SaaS Tool", color: "#FF6B35",
@@ -60,6 +61,7 @@ export const DEFAULT_PROJECTS: Project[] = [
         createdDate: new Date(Date.now() - 60 * 86400000),
         goals: [{ id: 3, title: "Complete MVP", target: 56, current: 29, category: "Delivery" }],
         issues: [],
+        tasks: [],
     },
     {
         id: 3, name: "CloudForge", category: "DevOps", color: "#A78BFA",
@@ -94,5 +96,6 @@ export const DEFAULT_PROJECTS: Project[] = [
             { id: 5, title: "Sub-5min deployments", target: 5, current: 7, category: "Performance" },
         ],
         issues: [],
+        tasks: [],
     },
 ];

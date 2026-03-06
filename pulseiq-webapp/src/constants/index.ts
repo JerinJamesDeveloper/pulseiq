@@ -18,6 +18,11 @@ export const DOC_STATUSES = ["draft", "in-progress", "complete"];
 
 export const ISSUE_STATUSES = ["open", "in-progress", "resolved", "closed"];
 export const ISSUE_PRIORITIES = ["low", "medium", "high", "critical"];
+export const TASK_STATUSES = ["todo", "in-progress", "completed"];
+export const TASK_TYPES = ["feature", "bug", "improvement", "research"];
+export const TASK_PRIORITIES = ["low", "medium", "high", "critical"];
+export const TASK_RISK_LEVELS = ["low", "medium", "high"];
+export const TASK_IMPACT_LEVELS = ["low", "medium", "high"];
 
 export const inputStyle: React.CSSProperties = {
     width: "100%",

@@ -304,6 +304,69 @@ CREATE TABLE sync_queue (
     INDEX idx_created (createdAt)
 );
 
+
+DELIMITER $$
+
+CREATE TRIGGER trg_update_weekly_hours
+AFTER INSERT ON daily_reports
+FOR EACH ROW
+BEGIN
+
+DECLARE week_start DATE;
+DECLARE day_name VARCHAR(10);
+
+-- Calculate Monday of the week
+SET week_start = DATE_SUB(NEW.date, INTERVAL WEEKDAY(NEW.date) DAY);
+
+-- Determine day name
+SET day_name = DAYNAME(NEW.date);
+
+-- Ensure weekly row exists
+INSERT INTO weekly_hours (projectId, weekStartDate)
+VALUES (NEW.projectId, week_start)
+ON DUPLICATE KEY UPDATE projectId = projectId;
+
+-- Update correct day column
+IF day_name = 'Monday' THEN
+    UPDATE weekly_hours 
+    SET monday = monday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Tuesday' THEN
+    UPDATE weekly_hours 
+    SET tuesday = tuesday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Wednesday' THEN
+    UPDATE weekly_hours 
+    SET wednesday = wednesday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Thursday' THEN
+    UPDATE weekly_hours 
+    SET thursday = thursday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Friday' THEN
+    UPDATE weekly_hours 
+    SET friday = friday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Saturday' THEN
+    UPDATE weekly_hours 
+    SET saturday = saturday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+
+ELSEIF day_name = 'Sunday' THEN
+    UPDATE weekly_hours 
+    SET sunday = sunday + NEW.hoursWorked
+    WHERE projectId = NEW.projectId AND weekStartDate = week_start;
+END IF;
+
+END$$
+
+DELIMITER ;
+
 -- =====================================================
 -- 15. ISSUES TABLE
 -- =====================================================

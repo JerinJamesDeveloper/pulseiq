@@ -63,6 +63,11 @@ export interface GoalDTO {
 
 export type IssueStatus = "open" | "in-progress" | "resolved" | "closed";
 export type IssuePriority = "low" | "medium" | "high" | "critical";
+export type TaskStatus = "todo" | "in-progress" | "completed";
+export type TaskType = "feature" | "bug" | "improvement" | "research";
+export type TaskPriority = "low" | "medium" | "high" | "critical";
+export type TaskRiskLevel = "low" | "medium" | "high";
+export type TaskImpactLevel = "low" | "medium" | "high";
 
 export interface IssueDTO {
   id: number;
@@ -79,9 +84,32 @@ export interface TaskDTO {
   id: number;
   projectId: number;
   title: string;
-  status: "todo" | "in-progress" | "completed";
+  description?: string | null;
+  type?: TaskType | null;
+  status: TaskStatus;
+  priority?: TaskPriority | null;
+  storyPoints?: number | null;
+  complexityScore?: number | null;
+  createdBy?: number | null;
+  assignedTo?: number | null;
+  reviewerId?: number | null;
+  sprintId?: number | null;
+  milestoneId?: number | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
+  commitCount?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  filesChanged?: number;
+  branchName?: string | null;
+  pullRequestId?: string | null;
+  riskLevel?: TaskRiskLevel | null;
+  impactLevel?: TaskImpactLevel | null;
   dateCreated: string;
-  updatedAt?: string;
+  dateUpdated?: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  completedAt?: string | null;
 }
 
 export interface ProjectDTO {
@@ -240,12 +268,58 @@ export interface UpdateIssuePayload {
 
 export interface CreateTaskPayload {
   title: string;
-  status?: "todo" | "in-progress" | "completed";
+  description?: string;
+  type?: TaskType;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  storyPoints?: number;
+  complexityScore?: number;
+  createdBy?: number;
+  assignedTo?: number;
+  reviewerId?: number;
+  sprintId?: number;
+  milestoneId?: number;
+  estimatedHours?: number;
+  actualHours?: number;
+  commitCount?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  filesChanged?: number;
+  branchName?: string;
+  pullRequestId?: string;
+  riskLevel?: TaskRiskLevel;
+  impactLevel?: TaskImpactLevel;
+  startDate?: string;
+  dueDate?: string;
+  completedAt?: string;
 }
 
 export interface UpdateTaskPayload {
   title?: string;
-  status?: "todo" | "in-progress" | "completed";
+  description?: string | null;
+  type?: TaskType | null;
+  status?: TaskStatus;
+  priority?: TaskPriority | null;
+  storyPoints?: number | null;
+  complexityScore?: number | null;
+  createdBy?: number | null;
+  assignedTo?: number | null;
+  reviewerId?: number | null;
+  sprintId?: number | null;
+  milestoneId?: number | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
+  commitCount?: number | null;
+  linesAdded?: number | null;
+  linesRemoved?: number | null;
+  filesChanged?: number | null;
+  branchName?: string | null;
+  pullRequestId?: string | null;
+  riskLevel?: TaskRiskLevel | null;
+  impactLevel?: TaskImpactLevel | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  completedAt?: string | null;
 }
 
 // ─── API RESPONSE WRAPPERS ────────────────────────────────────────────────────

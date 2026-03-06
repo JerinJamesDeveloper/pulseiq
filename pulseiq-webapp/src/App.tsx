@@ -23,6 +23,7 @@ import {
   type CreateDocumentPayload,
   type CreateGoalPayload,
   type CreateIssuePayload,
+  type CreateTaskPayload,
   type IssueDTO,
   type TaskDTO,
   type DashboardStatsDTO
@@ -840,12 +841,43 @@ export function App() {
     }
   }, [syncStatus, addToast, refreshDashboardStats]);
 
-  const handleCreateTask = useCallback(async (projectId: number, payload: { title: string; status: string }) => {
+  const handleCreateTask = useCallback(async (projectId: number, payload: CreateTaskPayload) => {
     setSaving(true);
-    let created: TaskDTO = { id: Date.now(), title: payload.title, status: payload.status as any, projectId, dateCreated: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const now = new Date().toISOString();
+    let created: TaskDTO = {
+      id: Date.now(),
+      projectId,
+      title: payload.title,
+      description: payload.description,
+      type: payload.type,
+      status: payload.status || "todo",
+      priority: payload.priority,
+      storyPoints: payload.storyPoints,
+      complexityScore: payload.complexityScore,
+      createdBy: payload.createdBy,
+      assignedTo: payload.assignedTo,
+      reviewerId: payload.reviewerId,
+      sprintId: payload.sprintId,
+      milestoneId: payload.milestoneId,
+      estimatedHours: payload.estimatedHours,
+      actualHours: payload.actualHours,
+      commitCount: payload.commitCount ?? 0,
+      linesAdded: payload.linesAdded ?? 0,
+      linesRemoved: payload.linesRemoved ?? 0,
+      filesChanged: payload.filesChanged ?? 0,
+      branchName: payload.branchName,
+      pullRequestId: payload.pullRequestId,
+      riskLevel: payload.riskLevel,
+      impactLevel: payload.impactLevel,
+      dateCreated: now,
+      dateUpdated: now,
+      startDate: payload.startDate,
+      dueDate: payload.dueDate,
+      completedAt: payload.completedAt ?? ((payload.status || "todo") === "completed" ? now : undefined),
+    };
     try {
       if (syncStatus === "synced") {
-        const response = await tasksApi.create(projectId, payload as any);
+        const response = await tasksApi.create(projectId, payload);
         created = response.data;
       }
     } catch (err) { console.error(err); if (err instanceof NetworkError) setSyncStatus("offline"); }
@@ -860,13 +892,47 @@ export function App() {
   }, [syncStatus, refreshDashboardStats]);
 
   const handleUpdateTask = useCallback(async (projectId: number, task: TaskDTO) => {
+    const normalizedCompletedAt = task.status === "completed"
+      ? (task.completedAt ?? new Date().toISOString())
+      : null;
     try {
       if (syncStatus === "synced") {
-        await tasksApi.update(projectId, task.id, { title: task.title, status: task.status });
+        await tasksApi.update(projectId, task.id, {
+          title: task.title,
+          description: task.description ?? null,
+          type: task.type ?? null,
+          status: task.status,
+          priority: task.priority ?? null,
+          storyPoints: task.storyPoints ?? null,
+          complexityScore: task.complexityScore ?? null,
+          createdBy: task.createdBy ?? null,
+          assignedTo: task.assignedTo ?? null,
+          reviewerId: task.reviewerId ?? null,
+          sprintId: task.sprintId ?? null,
+          milestoneId: task.milestoneId ?? null,
+          estimatedHours: task.estimatedHours ?? null,
+          actualHours: task.actualHours ?? null,
+          commitCount: task.commitCount ?? 0,
+          linesAdded: task.linesAdded ?? 0,
+          linesRemoved: task.linesRemoved ?? 0,
+          filesChanged: task.filesChanged ?? 0,
+          branchName: task.branchName ?? null,
+          pullRequestId: task.pullRequestId ?? null,
+          riskLevel: task.riskLevel ?? null,
+          impactLevel: task.impactLevel ?? null,
+          startDate: task.startDate ?? null,
+          dueDate: task.dueDate ?? null,
+          completedAt: normalizedCompletedAt,
+        });
       }
     } catch (err) { console.error(err); if (err instanceof NetworkError) setSyncStatus("offline"); }
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: p.tasks.map(t => t.id === task.id ? task : t) } : p));
-    setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, tasks: prev.tasks.map(t => t.id === task.id ? task : t) } : prev);
+    const nextTask: TaskDTO = {
+      ...task,
+      dateUpdated: new Date().toISOString(),
+      completedAt: normalizedCompletedAt ?? undefined,
+    };
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: p.tasks.map(t => t.id === task.id ? nextTask : t) } : p));
+    setSelectedProject(prev => prev && prev.id === projectId ? { ...prev, tasks: prev.tasks.map(t => t.id === task.id ? nextTask : t) } : prev);
     if (syncStatus === "synced") {
       refreshDashboardStats(true);
     }

@@ -10,6 +10,7 @@ import {
     type CreateDocumentPayload,
     type CreateGoalPayload,
     type CreateIssuePayload,
+    type CreateTaskPayload,
     type IssueDTO,
     type TaskDTO,
 } from "../../api";
@@ -82,7 +83,7 @@ export function ProjectDetail({
     onDeleteDoc: (projectId: number, docId: number) => void;
     onDeleteGoal: (projectId: number, goalId: number) => void;
     onDeleteIssue: (projectId: number, issueId: number) => void;
-    onCreateTask: (projectId: number, payload: { title: string; status: string }) => void;
+    onCreateTask: (projectId: number, payload: CreateTaskPayload) => void;
     onUpdateTask: (projectId: number, task: TaskDTO) => void;
     onDeleteTask: (projectId: number, taskId: number) => void;
     saving: boolean;
@@ -105,6 +106,7 @@ export function ProjectDetail({
     const [showGoalModal, setShowGoalModal] = useState(false);
     const [showIssueModal, setShowIssueModal] = useState(false);
     const [showTaskModal, setShowTaskModal] = useState(false);
+    const [editingTask, setEditingTask] = useState<TaskDTO | null>(null);
     const [editingGoal, setEditingGoal] = useState<GoalDTO | null>(null);
     const [editingIssue, setEditingIssue] = useState<IssueDTO | null>(null);
     const [expandedDoc, setExpandedDoc] = useState<number | null>(null);
@@ -149,6 +151,12 @@ export function ProjectDetail({
         closed: "#555",
     };
     const issuePriorityColors: Record<string, string> = {
+        low: "#555",
+        medium: "#FFD700",
+        high: "#FF6B35",
+        critical: "#FF4444",
+    };
+    const taskPriorityColors: Record<string, string> = {
         low: "#555",
         medium: "#FFD700",
         high: "#FF6B35",
@@ -214,6 +222,7 @@ export function ProjectDetail({
                 {[
                     { label: "🧠 Add Learning", onClick: () => setShowLearning(true) },
                     { label: "📅 Daily Report", onClick: () => setShowDailyReport(true) },
+                    { label: "✅ Add Task", onClick: () => setShowTaskModal(true) },
                     { label: "📝 Add Doc", onClick: () => setShowDocModal(true) },
                     { label: "🎯 Add Goal", onClick: () => setShowGoalModal(true) },
                     { label: "🚩 Add Issue", onClick: () => setShowIssueModal(true) },
@@ -1265,9 +1274,49 @@ export function ProjectDetail({
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {(project.tasks || []).map(task => (
-                        <div key={task.id} style={{ background: '#080810', padding: '10px 14px', borderRadius: 8, border: '1px solid #111122', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: 12, color: "#ccc" }}>{task.title}</span>
+                        <div key={task.id} style={{ background: '#080810', padding: '12px 14px', borderRadius: 8, border: '1px solid #111122', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 12, color: "#ccc", fontWeight: 700 }}>{task.title}</div>
+                                {task.description && (
+                                    <div style={{ fontSize: 11, color: "#777", marginTop: 6 }}>{task.description}</div>
+                                )}
+                                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+                                    {task.type && (
+                                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: `${project.color}22`, color: project.color, textTransform: "uppercase", fontWeight: 700, fontFamily: "monospace" }}>
+                                            {task.type}
+                                        </span>
+                                    )}
+                                    {task.priority && (
+                                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: `${taskPriorityColors[task.priority] || "#555"}22`, color: taskPriorityColors[task.priority] || "#555", textTransform: "uppercase", fontWeight: 700, fontFamily: "monospace" }}>
+                                            {task.priority}
+                                        </span>
+                                    )}
+                                    {task.storyPoints !== undefined && task.storyPoints !== null && (
+                                        <span style={{ fontSize: 10, color: "#666", fontFamily: "monospace" }}>SP {task.storyPoints}</span>
+                                    )}
+                                    {task.dueDate && (
+                                        <span style={{ fontSize: 10, color: "#666", fontFamily: "monospace" }}>
+                                            Due {new Date(task.dueDate).toLocaleDateString()}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <button
+                                    onClick={() => setEditingTask(task)}
+                                    style={{
+                                        background: "transparent",
+                                        border: `1px solid ${project.color}44`,
+                                        color: project.color,
+                                        padding: "2px 6px",
+                                        borderRadius: 4,
+                                        cursor: "pointer",
+                                        fontSize: 9,
+                                        fontFamily: "monospace",
+                                    }}
+                                >
+                                    Edit
+                                </button>
                                 <button
                                     onClick={() => onUpdateTask(project.id, { ...task, status: task.status === 'completed' ? 'todo' : 'completed' })}
                                     style={{
@@ -1597,8 +1646,25 @@ export function ProjectDetail({
                     saving={saving}
                     onClose={() => setShowTaskModal(false)}
                     onSave={(payload) => {
-                        onCreateTask(project.id, { title: payload.title, status: payload.status || "todo" });
+                        onCreateTask(project.id, payload);
                         setShowTaskModal(false);
+                    }}
+                />
+            )}
+            {editingTask && (
+                <AddTaskModal
+                    project={project}
+                    saving={saving}
+                    mode="edit"
+                    initialTask={editingTask}
+                    onClose={() => setEditingTask(null)}
+                    onSave={(payload) => {
+                        onUpdateTask(project.id, {
+                            ...editingTask,
+                            ...payload,
+                            status: payload.status || editingTask.status,
+                        });
+                        setEditingTask(null);
                     }}
                 />
             )}

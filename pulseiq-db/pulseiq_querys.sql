@@ -15,3 +15,12 @@ select * from weekly_hours;
    AND weekStartDate <= CURDATE()
    ORDER BY weekStartDate DESC
    LIMIT 1;
+   
+   
+   SELECT monday, tuesday, wednesday, thursday, friday, saturday, sunday, weekStartDate
+FROM weekly_hours
+WHERE projectId = 2
+AND weekStartDate = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+LIMIT 1;
+
+delete from daily_reports where id = 15;
