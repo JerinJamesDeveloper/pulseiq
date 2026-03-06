@@ -55,6 +55,7 @@ import { ProjectDetail } from "./components/layout/ProjectDetail";
 import { GoalsPage } from "./components/features/GoalsPage";
 import { AddProjectModal } from "./components/modals/AddProjectModal";
 import { ApiConfigModal } from "./components/modals/ApiConfigModal";
+import { DashboardReports } from "./components/features/DashboardReports";
 
 const DASHBOARD_CACHE_KEY = "pulseiq_dashboard_stats_v1";
 
@@ -67,7 +68,8 @@ export function App() {
   const [filter, setFilter] = useState("all");
   const [categoryFilter] = useState("all");
   const [showNewProject, setShowNewProject] = useState(false);
-  const [showApiConfig, setShowApiConfig] = useState(false);
+const [showApiConfig, setShowApiConfig] = useState(false);
+  const [showDashboardReports, setShowDashboardReports] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("offline");
   const [saving, setSaving] = useState(false);
   const [fetchingGitProjectId, setFetchingGitProjectId] = useState<number | null>(null);
@@ -1180,15 +1182,21 @@ export function App() {
           />
         ) : view === "dashboard" ? (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
+<div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 32 }}>
               <div>
                 <h2 style={{ margin: "0 0 6px", fontSize: 28, color: "#fff", fontWeight: 800 }}>Welcome Back, Dev</h2>
                 <p style={{ margin: 0, color: "#555", fontFamily: "monospace", fontSize: 12 }}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
               </div>
-              <button onClick={() => setShowNewProject(true)}
-                style={{ background: "#00FFB2", color: "#000", border: "none", padding: "12px 24px", borderRadius: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 14px rgba(0, 255, 178, 0.2)" }}>
-                <span style={{ fontSize: 18 }}>+</span> New Project
-              </button>
+              <div style={{ display: "flex", gap: 12 }}>
+                <button onClick={() => setShowNewProject(true)}
+                  style={{ background: "#00FFB2", color: "#000", border: "none", padding: "12px 24px", borderRadius: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 14px rgba(0, 255, 178, 0.2)" }}>
+                  <span style={{ fontSize: 18 }}>+</span> New Project
+                </button>
+                <button onClick={() => setShowDashboardReports(true)}
+                  style={{ background: "#38BDF8", color: "#000", border: "none", padding: "12px 24px", borderRadius: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 14px rgba(56, 189, 248, 0.2)" }}>
+                  <span style={{ fontSize: 18 }}>📅</span> Add Reports
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20, marginBottom: 32 }}>
@@ -1485,7 +1493,7 @@ export function App() {
           />
         )
       }
-      {
+{
         showApiConfig && (
           <ApiConfigModal
             currentUrl={apiBaseUrl}
@@ -1495,6 +1503,16 @@ export function App() {
               localStorage.setItem("pulseiq_api_base_url", url);
               connectToApi(url);
             }}
+          />
+        )
+      }
+      {
+        showDashboardReports && (
+          <DashboardReports
+            projects={projects}
+            onClose={() => setShowDashboardReports(false)}
+            onSave={handleCreateReport}
+            saving={saving}
           />
         )
       }
