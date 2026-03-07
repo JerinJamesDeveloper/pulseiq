@@ -1,4 +1,4 @@
-# 🚀 PulseIQ v2.4.1
+# 🚀 PulseIQ v2.4.2
 
 **PulseIQ** is an enterprise-ready engineering intelligence platform for teams and builders who want a single source of truth for delivery, learning, documentation, and Git activity.
 
@@ -163,19 +163,21 @@ MIT
 
 ## 🏷️ Changelog
 
-### v2.4.1 (Current)
+### v2.4.2 (Current)
 
 #### Features
-- **GitHub Issue Sync**: Issues created in PulseIQ now sync to GitHub. When you close/update an issue in PulseIQ, it reflects in GitHub.
-- **Issue Time Tracking**: Added `timeSpent` field to manually track hours spent on issues. Users can input time when creating or updating issues. Time updates are synced to GitHub as comments.
+- **GitHub Issue Bidirectional Sync**: Issues created in PulseIQ now sync to GitHub. When you close/update an issue in PulseIQ, it now reflects in GitHub.
+- **Project Hours from Tasks + Issues**: Project totalHours is now calculated from task actualHours + issue timeSpent. Daily report hours are no longer used for project total.
+- **Issue Time Tracking**: Added `timeSpent` field to manually track hours spent on issues.
 
 #### Technical Changes
-- Added `updateIssue()` method to GitHub service for syncing issue updates
+- Added `updateIssue()` method to GitHub service for syncing issue updates to GitHub
 - Added `githubNumber` field to store GitHub issue reference
 - Added `timeSpent` field (DECIMAL) to issues table
-- Updated API types and payloads to support new fields
+- Updated task controller to recalculate project totalHours when task actualHours is saved
+- Updated issue controller to recalculate project totalHours when issue timeSpent is updated
 - Added database migration script for new columns
-- Added Time Spent input field to Add Issue modal
+- Formula: `project.totalHours = SUM(tasks.actualHours) + SUM(issues.timeSpent)`
 
 #### Database Migration
 Run the migration to add new columns:
@@ -187,6 +189,13 @@ Or manually:
 ALTER TABLE issues ADD COLUMN githubNumber INT NULL;
 ALTER TABLE issues ADD COLUMN timeSpent DECIMAL(10,2) DEFAULT 0;
 ```
+
+---
+
+### v2.4.1
+
+#### Features
+- **GitHub Issue Sync**: Issues created in PulseIQ now sync to GitHub.
 
 ---
 

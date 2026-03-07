@@ -1,6 +1,6 @@
 {
   "name": "pulseiq-api",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "description": "PulseIQ REST API with MySQL",
   "main": "server.js",
   "bin": "server.js",
