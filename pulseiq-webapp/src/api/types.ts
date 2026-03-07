@@ -76,6 +76,8 @@ export interface IssueDTO {
   description: string;
   status: IssueStatus;
   priority: IssuePriority;
+  timeSpent?: number;
+  githubNumber?: number;
   dateCreated: string;
   updatedAt?: string;
 }
@@ -257,6 +259,7 @@ export interface CreateIssuePayload {
   description: string;
   status: IssueStatus;
   priority: IssuePriority;
+  timeSpent?: number;
 }
 
 export interface UpdateIssuePayload {
@@ -264,6 +267,7 @@ export interface UpdateIssuePayload {
   description?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
+  timeSpent?: number;
 }
 
 export interface CreateTaskPayload {

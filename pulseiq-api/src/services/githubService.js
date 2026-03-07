@@ -160,6 +160,62 @@ class GitHubService {
         return this.requestJson('POST', `/repos/${owner}/${repo}/issues`, payload);
     }
 
+    static async updateIssue(repoInput, issueNumber, issueData) {
+        if (!GITHUB_TOKEN) {
+            const error = new Error('GITHUB_TOKEN is not configured');
+            error.statusCode = 400;
+            error.status = 400;
+            throw error;
+        }
+
+        if (!issueNumber) {
+            const error = new Error('Issue number is required to update a GitHub issue');
+            error.statusCode = 400;
+            error.status = 400;
+            throw error;
+        }
+
+        const { owner, repo } = this.parseRepo(repoInput);
+        const payload = {};
+
+        if (issueData.title !== undefined) {
+            payload.title = issueData.title.trim();
+        }
+
+        if (issueData.description !== undefined) {
+            payload.body = String(issueData.description);
+        }
+
+        // Handle state change (closing/reopening issues)
+        if (issueData.status !== undefined) {
+            if (issueData.status === 'closed') {
+                payload.state = 'closed';
+            } else if (issueData.status === 'open') {
+                payload.state = 'open';
+            }
+        }
+
+        // Update labels if status or priority changed
+        if (issueData.status !== undefined || issueData.priority !== undefined) {
+            payload.labels = this.buildIssueLabels(issueData);
+        }
+
+        const result = await this.requestJson('PATCH', `/repos/${owner}/${repo}/issues/${issueNumber}`, payload);
+
+        // If timeSpent was updated, add a comment to the GitHub issue
+        if (issueData.timeSpent !== undefined) {
+            const hours = parseFloat(issueData.timeSpent);
+            if (!isNaN(hours) && hours > 0) {
+                const timeComment = `**Time Spent:** ${hours} hour(s) tracked in PulseIQ`;
+                await this.requestJson('POST', `/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
+                    body: timeComment
+                });
+            }
+        }
+
+        return result;
+    }
+
     static extractLastPage(linkHeader) {
         if (!linkHeader || typeof linkHeader !== 'string') {
             return null;

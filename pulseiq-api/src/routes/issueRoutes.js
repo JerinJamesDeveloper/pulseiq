@@ -7,7 +7,8 @@ const issueValidation = [
     body('title').isLength({ min: 1, max: 200 }),
     body('description').isLength({ min: 1 }),
     body('status').isIn(['open', 'in-progress', 'resolved', 'closed']),
-    body('priority').isIn(['low', 'medium', 'high', 'critical'])
+    body('priority').isIn(['low', 'medium', 'high', 'critical']),
+    body('timeSpent').optional().isFloat({ min: 0 })
 ];
 
 router.get('/', issueController.getProjectIssues);

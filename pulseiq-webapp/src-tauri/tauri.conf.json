@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "pulseiq",
-  "version": "1.0.0",
+  "version": "2.4.1",
   "identifier": "com.embitlabs.pulseiq",
   "build": {
     "frontendDist": "../dist",

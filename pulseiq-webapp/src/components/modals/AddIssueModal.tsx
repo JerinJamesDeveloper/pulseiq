@@ -20,6 +20,7 @@ export function AddIssueModal({
         description: "",
         status: "open",
         priority: "medium",
+        timeSpent: 0,
     });
 
     return (
@@ -60,7 +61,7 @@ export function AddIssueModal({
                 <div
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
+                        gridTemplateColumns: "1fr 1fr 1fr",
                         gap: 12,
                         marginBottom: 14,
                     }}
@@ -92,6 +93,18 @@ export function AddIssueModal({
                                 </option>
                             ))}
                         </select>
+                    </div>
+                    <div>
+                        <label style={labelStyle}>Time Spent (hrs)</label>
+                        <input
+                            type="number"
+                            value={form.timeSpent}
+                            onChange={(e) => setForm({ ...form, timeSpent: parseFloat(e.target.value) || 0 })}
+                            placeholder="0"
+                            min="0"
+                            step="0.5"
+                            style={inputStyle}
+                        />
                     </div>
                 </div>
 
@@ -130,6 +143,7 @@ export function AddIssueModal({
                                     description: form.description.trim(),
                                     status: form.status as IssueStatus,
                                     priority: form.priority as IssuePriority,
+                                    timeSpent: form.timeSpent,
                                 });
                             }
                         }}

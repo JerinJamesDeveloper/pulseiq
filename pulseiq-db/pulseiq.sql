@@ -103,6 +103,47 @@ CREATE TABLE weekly_hours (
     INDEX idx_project_week (projectId, weekStartDate)
 );
 
+-- -------------------------------------------------
+			-- task table
+-- ------------------------------------------------
+ALTER TABLE tasks
+
+ADD COLUMN description TEXT AFTER title,
+
+ADD COLUMN type ENUM('feature','bug','improvement','research') AFTER description,
+
+ADD COLUMN priority ENUM('low','medium','high','critical') AFTER status,
+
+ADD COLUMN storyPoints INT AFTER priority,
+ADD COLUMN complexityScore INT AFTER storyPoints,
+
+ADD COLUMN createdBy INT AFTER complexityScore,
+ADD COLUMN assignedTo INT AFTER createdBy,
+ADD COLUMN reviewerId INT AFTER assignedTo,
+
+ADD COLUMN sprintId INT AFTER reviewerId,
+ADD COLUMN milestoneId INT AFTER sprintId,
+
+ADD COLUMN estimatedHours FLOAT AFTER milestoneId,
+ADD COLUMN actualHours FLOAT AFTER estimatedHours,
+
+ADD COLUMN commitCount INT DEFAULT 0 AFTER actualHours,
+ADD COLUMN linesAdded INT DEFAULT 0 AFTER commitCount,
+ADD COLUMN linesRemoved INT DEFAULT 0 AFTER linesAdded,
+ADD COLUMN filesChanged INT DEFAULT 0 AFTER linesRemoved,
+
+ADD COLUMN branchName VARCHAR(255) AFTER filesChanged,
+ADD COLUMN pullRequestId VARCHAR(255) AFTER branchName,
+
+ADD COLUMN riskLevel ENUM('low','medium','high') AFTER pullRequestId,
+ADD COLUMN impactLevel ENUM('low','medium','high') AFTER riskLevel,
+
+ADD COLUMN dateUpdated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER dateCreated,
+
+ADD COLUMN startDate DATETIME AFTER dateUpdated,
+ADD COLUMN dueDate DATETIME AFTER startDate,
+ADD COLUMN completedAt DATETIME AFTER dueDate;
+
 -- =====================================================
 -- 4. MONTHLY HOURS TABLE (Daily tracking for last 15 days)
 -- =====================================================

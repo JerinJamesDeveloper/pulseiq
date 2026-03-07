@@ -16,9 +16,9 @@ class Issue {
 
     static async create(projectId, issueData) {
         const [result] = await pool.query( 
-            `INSERT INTO issues (projectId, title, description, status, priority)
-             VALUES (?, ?, ?, ?, ?)`,
-            [projectId, issueData.title, issueData.description, issueData.status, issueData.priority]
+            `INSERT INTO issues (projectId, title, description, status, priority, githubNumber, timeSpent)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [projectId, issueData.title, issueData.description, issueData.status, issueData.priority, issueData.githubNumber || null, issueData.timeSpent || 0]
         );
         return result.insertId;
     }
@@ -27,7 +27,7 @@ class Issue {
         const updates = [];
         const values = [];
 
-        const allowedFields = ['title', 'description', 'status', 'priority'];
+        const allowedFields = ['title', 'description', 'status', 'priority', 'timeSpent'];
 
         for (const field of allowedFields) {
             if (issueData[field] !== undefined) {

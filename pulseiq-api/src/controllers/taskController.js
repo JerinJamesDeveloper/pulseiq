@@ -1,5 +1,6 @@
 const Task = require('../models/Task');
 const Project = require('../models/Project');
+const { pool } = require('../config/database');
 const { body, validationResult } = require('express-validator');
 
 const taskValidationRules = [
@@ -119,8 +120,40 @@ const taskController = {
                 });
             }
 
+            // Get the old actualHours before update
+            const oldActualHours = task.actualHours || 0;
+
             await Task.update(req.params.id, req.body);
             const updatedTask = await Task.findById(req.params.id);
+
+            // Calculate total hours from tasks and issues for this project
+            if (req.body.actualHours !== undefined) {
+                const newActualHours = req.body.actualHours || 0;
+                const hoursDiff = newActualHours - oldActualHours;
+
+                if (hoursDiff !== 0) {
+                    // Get total timeSpent from issues for this project
+                    const [issues] = await pool.query(
+                        'SELECT COALESCE(SUM(timeSpent), 0) as totalIssueTime FROM issues WHERE projectId = ?',
+                        [task.projectId]
+                    );
+                    const totalIssueTime = issues[0]?.totalIssueTime || 0;
+
+                    // Get total actualHours from all tasks for this project
+                    const [taskHours] = await pool.query(
+                        'SELECT COALESCE(SUM(actualHours), 0) as totalTaskHours FROM tasks WHERE projectId = ?',
+                        [task.projectId]
+                    );
+                    const totalTaskHours = taskHours[0]?.totalTaskHours || 0;
+
+                    // Update project totalHours = task actualHours + issue timeSpent
+                    const newTotalHours = parseFloat(totalTaskHours) + parseFloat(totalIssueTime);
+                    await pool.query(
+                        'UPDATE projects SET totalHours = ? WHERE id = ?',
+                        [newTotalHours, task.projectId]
+                    );
+                }
+            }
 
             res.json({
                 data: updatedTask,
