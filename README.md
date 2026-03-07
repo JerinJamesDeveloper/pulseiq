@@ -73,7 +73,7 @@ cp .env.example .env
 npm install
 npm run dev
 ```
-
+   
 ### 2. Web App Setup
 
 ```bash

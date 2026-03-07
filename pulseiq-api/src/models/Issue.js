@@ -21,7 +21,7 @@ class Issue {
             [projectId, issueData.title, issueData.description, issueData.status, issueData.priority, issueData.githubNumber || null, issueData.timeSpent || 0]
         );
         return result.insertId;
-    }
+    }    
 
     static async update(id, issueData) {
         const updates = [];
