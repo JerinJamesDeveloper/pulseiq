@@ -22,6 +22,7 @@ export function EditIssueModal({
         description: issue.description,
         status: issue.status,
         priority: issue.priority,
+        timeSpent: issue.timeSpent || 0,
     });
 
     return (
@@ -82,6 +83,28 @@ export function EditIssueModal({
                         </select>
                     </div>
                     <div>
+                        <label style={labelStyle}>Time Spent (hours)</label>
+                        <input
+                            type="number"
+                            value={form.timeSpent}
+                            onChange={(e) => setForm({ ...form, timeSpent: parseFloat(e.target.value) || 0 })}
+                            placeholder="0"
+                            min="0"
+                            step="0.5"
+                            style={inputStyle}
+                        />
+                    </div>
+                </div>
+
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 12,
+                        marginBottom: 14,
+                    }}
+                >
+                    <div>
                         <label style={labelStyle}>Status</label>
                         <select
                             value={form.status}
@@ -133,6 +156,7 @@ export function EditIssueModal({
                                     description: form.description.trim(),
                                     status: form.status,
                                     priority: form.priority,
+                                    timeSpent: form.timeSpent,
                                 });
                             }
                         }}

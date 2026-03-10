@@ -29,6 +29,7 @@ import { StatCard } from "../common/StatCard";
 import { WeeklyChart } from "../common/WeeklyChart";
 import { MiniBar } from "../common/MiniBar";
 import { GitMetricsView } from "../features/GitMetricsView";
+import { ProjectTimer } from "../features/ProjectTimer";
 import { AddLearningModal } from "../modals/AddLearningModal";
 import { AddDailyReportModal } from "../modals/AddDailyReportModal";
 import { AddDocumentModal } from "../modals/AddDocumentModal";
@@ -64,6 +65,7 @@ export function ProjectDetail({
     onCreateTask,
     onUpdateTask,
     onDeleteTask,
+    onTimerSaveTime,
 }: {
     project: Project;
     onClose: () => void;
@@ -88,6 +90,7 @@ export function ProjectDetail({
     onDeleteTask: (projectId: number, taskId: number) => void;
     saving: boolean;
     fetchingGit: boolean;
+    onTimerSaveTime?: (projectId: number, hours: number) => void;
 }) {
     const health = calcHealth(project);
     const completion = calcCompletion(project);
@@ -363,6 +366,16 @@ export function ProjectDetail({
                     <StatCard key={label} label={label} value={value} accent={color} />
                 ))}
             </div>
+
+            {/* Project Timer */}
+            {onTimerSaveTime && (
+                <ProjectTimer
+                    projectId={project.id}
+                    projectName={project.name}
+                    onSaveTime={onTimerSaveTime}
+                    color={project.color}
+                />
+            )}
 
             {/* Repository */}
             <div

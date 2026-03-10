@@ -734,6 +734,7 @@ const [showApiConfig, setShowApiConfig] = useState(false);
           description: issue.description,
           status: issue.status,
           priority: issue.priority,
+          timeSpent: issue.timeSpent,
         });
       }
     } catch (err) {
@@ -1001,6 +1002,26 @@ const [showApiConfig, setShowApiConfig] = useState(false);
     addToast("API settings saved", "success");
   }, [settingsApiUrl, connectToApi, addToast]);
 
+  // ── Timer Handler ───────────────────────────────────────────────────────────
+  const handleTimerSaveTime = useCallback(async (projectId: number, hours: number) => {
+    if (hours <= 0) return;
+    
+    const project = projects.find(p => p.id === projectId);
+    if (!project) {
+      addToast("Project not found", "error");
+      return;
+    }
+
+    const updatedProject = {
+      ...project,
+      totalHours: project.totalHours + hours,
+      lastActive: new Date(),
+    };
+
+    await handleUpdateProject(updatedProject);
+    addToast(`Added ${hours.toFixed(2)} hours to ${project.name}`, "success");
+  }, [projects, handleUpdateProject, addToast]);
+
   // ── Computed values ─────────────────────────────────────────────────────────
   const totalHours = projects?.reduce((a, p) => a + (p.totalHours || 0), 0) || 0;
   const totalCommits = projects?.reduce((a, p) => a + (p.commits || 0), 0) || 0;
@@ -1179,6 +1200,7 @@ const [showApiConfig, setShowApiConfig] = useState(false);
             onCreateTask={handleCreateTask}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
+            onTimerSaveTime={handleTimerSaveTime}
           />
         ) : view === "dashboard" ? (
           <div>

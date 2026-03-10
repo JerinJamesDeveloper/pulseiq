@@ -319,6 +319,10 @@ CREATE TABLE issues (
     INDEX idx_project_created (projectId, dateCreated)
 );
 
+ALTER TABLE issues ADD COLUMN githubNumber INT NULL;
+ALTER TABLE issues ADD COLUMN timeSpent DECIMAL(10,2) DEFAULT 0;
+
+
 
 ALTER TABLE goals 
 ADD COLUMN comments TEXT,
